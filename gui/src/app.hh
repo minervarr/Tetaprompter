@@ -211,6 +211,7 @@ private:
     std::string message_;
     bool message_error_ = false;
     double message_until_ = 0.0;
+    bool message_shown_last_ = false;
     double rec_started_ = 0.0;
     double record_test_stop_ = -1.0;
     bool record_test_ = false;

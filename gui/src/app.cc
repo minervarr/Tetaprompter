@@ -782,6 +782,11 @@ void App::toggle_recording() {
 
 void App::tick() {
     const double now = now_monotonic();
+    const bool message_shown = message_visible();
+    if (message_shown != message_shown_last_) {
+        message_shown_last_ = message_shown;
+        needs_redraw_ = true;
+    }
 
     if (rec_phase_ == RecPhase::Recording) {
         if (record_test_ && record_test_stop_ > 0.0 && now >= record_test_stop_) {
