@@ -1,0 +1,65 @@
+From b06e5c172c54775dab877c40db0e0b7e320aed01 Mon Sep 17 00:00:00 2001
+From: nava <nava@noreply.com>
+Date: Thu, 22 Oct 2026 05:09:58 +0000
+Subject: [PATCH] Let dispatch poll a host timerfd for animation ticks
+
+---
+ platform/linux/wayland_display.cc | 11 ++++++++---
+ platform/linux/wayland_display.hh |  9 ++++++---
+ 2 files changed, 14 insertions(+), 6 deletions(-)
+
+diff --git a/platform/linux/wayland_display.cc b/platform/linux/wayland_display.cc
+index c426f4f..981bff7 100644
+--- a/platform/linux/wayland_display.cc
++++ b/platform/linux/wayland_display.cc
+@@ -874,7 +874,7 @@ void WaylandDisplay::fire_repeat(uint64_t expirations)
+ 
+ // ── the pump ────────────────────────────────────────────────────────────────
+ 
+-bool WaylandDisplay::dispatch(int timeout_ms)
++bool WaylandDisplay::dispatch(int timeout_ms, int extra_fd)
+ {
+     if (!display_) return false;
+ 
+@@ -882,11 +882,16 @@ bool WaylandDisplay::dispatch(int timeout_ms)
+         wl_display_dispatch_pending(display_);
+     wl_display_flush(display_);
+ 
+-    pollfd fds[3];
++    pollfd fds[4];
+     fds[0] = { wl_display_get_fd(display_), POLLIN, 0 };
+     fds[1] = { waker_.fd(),                 POLLIN, 0 };
+     fds[2] = { repeat_timer_fd_,            POLLIN, 0 };
+-    int n = poll(fds, 3, timeout_ms);
++    nfds_t count = 3;
++    if (extra_fd >= 0) {
++        fds[3] = { extra_fd, POLLIN, 0 };
++        count = 4;
++    }
++    int n = poll(fds, count, timeout_ms);
+ 
+     if (n > 0 && (fds[0].revents & POLLIN))
+         wl_display_read_events(display_);
+diff --git a/platform/linux/wayland_display.hh b/platform/linux/wayland_display.hh
+index 6f1c285..7c9d030 100644
+--- a/platform/linux/wayland_display.hh
++++ b/platform/linux/wayland_display.hh
+@@ -116,9 +116,12 @@ public:
+     FrameWaker& waker() { return waker_; }
+ 
+     // Pump: sleep up to timeout_ms for display events / waker / key repeat,
+-    // dispatch them. Returns false when the connection died (compositor gone
+-    // or protocol error) — the host should quit.
+-    bool dispatch(int timeout_ms);
++    // dispatch them. `extra_fd` (when >= 0) is included in the poll and left
++    // readable for the caller to drain — the host does this with its own
++    // timerfd, so a 60 Hz animation is not paced by the 250 ms display timeout.
++    // Returns false when the connection died (compositor gone or protocol
++    // error) — the host should quit.
++    bool dispatch(int timeout_ms, int extra_fd = -1);
+ 
+     void roundtrip();
+ 
+-- 
+2.56.0
+
