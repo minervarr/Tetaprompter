@@ -1,0 +1,17 @@
+{warm: Welcome}[0.45]Welcome [0.35]to [0.30]your [0.35]teleprompter.
+
+[0.35]This [0.30]built-in [0.40]test [0.30]script [0.35]shows [0.30]how [0.25]the [0.30]score [0.40]works.
+[0.30]Open [0.30]one [0.25]of [0.25]your [0.30]own [0.35]scripts [0.30]from [0.25]the [0.30]library.
+
+[1.0] [smile — a comment is shown and timed like everything else.]
+
+[1.5] [look at the camera and breathe]
+
+{somber: The turn}[0.40]Now [0.35]the [0.30]mood [0.35]changes [0.30]word [0.30]by [0.25]word.
+[0.30]The [0.30]past [0.35]fades, [0.30]the [0.30]next [0.35]line [0.30]stays [0.35]readable.
+
+{bright}[0.35]Give [0.30]a [0.25]comment [0.30]time [0.30]and [0.25]it [0.30]will [0.30]count.
+
+[0.35]Press [0.30]Space [0.30]to [0.25]start. [0.35]Press [0.30]Ctrl+R [0.30]to [0.30]return [0.30]to [0.30]the [0.30]library.
+
+[0.35]Good [0.30]luck— [0.35]and [0.30]look [0.30]right [0.30]at [0.25]the [0.35]lens.
