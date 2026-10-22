@@ -70,7 +70,7 @@ authored word times.
 These exist for automated verification and are not part of the user contract:
 
 ```
---capture out.ppm   render ~30 frames, write the last one as a PPM, exit
+--capture out.ppm   render 6 frames, write the last one as a PPM, exit
 --seek SECONDS      start the read at a clock position
 --autoplay          start scrolling immediately
 --record-test N     record N seconds, finalize, exit
