@@ -822,6 +822,9 @@ void App::run() {
         }
     }
     shutdown();
+    // The host may have called shutdown() from inside its own pump(); it is
+    // only safe to destroy it after pump() has returned.
+    host_.reset();
 }
 
 void App::shutdown() {
@@ -831,7 +834,6 @@ void App::shutdown() {
     if (host_) host_->stopTimer(1);
     if (recorder_) recorder_->stop_blocking();
     renderer_.reset();
-    host_.reset();
 }
 
 namespace {
