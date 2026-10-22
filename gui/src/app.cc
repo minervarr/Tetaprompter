@@ -115,6 +115,7 @@ double App::now_epoch() const {
 bool App::create() {
     cue_fraction_ = clampf(static_cast<float>(options_.line_percent) / 100.0f, kCueMin, kCueMax);
     if (!create_host()) return false;
+    fullscreen_ = !options_.windowed;
     compute_font();
 
     std::string font_error;
