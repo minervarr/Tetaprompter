@@ -199,10 +199,10 @@ The app calls small additions to the framework: `Host::setFullscreen()`,
 `WindowOptions::output` (Wayland connector selection), a console-restore helper
 for CLI modes without a TTY, and an optional extra fd in
 `WaylandDisplay::dispatch()` so the 16 ms scroll timer is not paced by the
-display's idle timeout. They are recorded as patches in `patches/`; CMake
-applies them idempotently to the pinned upstream submodules at configure time.
-If you already have the patched commits checked out, pass
-`-DTP_APPLY_FRAMEWORK_PATCHES=OFF`.
+display's idle timeout. They live on the framework repositories' `main`
+branches; the submodule commits pinned here are the exact build inputs, so a
+plain `git submodule update --init --recursive` reproduces the build with no
+patch step.
 
 ## Why the port looks different from the GTK app
 

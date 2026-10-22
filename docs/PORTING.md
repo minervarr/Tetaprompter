@@ -78,16 +78,21 @@ rendering/input stack.
 
 ## Framework changes
 
-Two small App_shell additions were needed and are committed in the submodule:
+Small framework additions were needed and are committed to the library mains:
 
 1. `Host::setFullscreen(bool)` and its Wayland implementation, so the library
    can start windowed and the prompter can go fullscreen without destroying the
    surface/Renderer.
-2. `app_shell_restore_console()`, called for CLI modes after the bootstrap has
+2. `WindowOptions::output`, so a fullscreen request can name the Wayland
+   connector instead of letting the compositor choose.
+3. `app_shell_restore_console()`, called for CLI modes after the bootstrap has
    redirected stdout/stderr to the log file. `--print-timing` and `--check` work
    from a pipe or CI.
+4. An optional extra fd in `WaylandDisplay::dispatch()`, polled with the display
+   so the 16 ms scroll timer is not paced by the 250 ms idle timeout.
 
-Patches are in `patches/`; the submodule pins the commits used by this build.
+The submodule pins record the exact commits this build uses; there is no patch
+step.
 
 ## Verification performed
 

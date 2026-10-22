@@ -52,7 +52,6 @@ docs/                        screenshot, PORTING.md, ROADMAP.md
 manifest.json                version + build entry point (CMake and scripts/)
 cmake/TestHelpers.cmake      teleprompter_add_test(), Debug-only
 scripts/                     build.sh, run.sh, verify.sh, builder sources/zipapp
-patches/                     notes/patches for framework changes
 ```
 
 ## Build / verify
@@ -211,5 +210,6 @@ Keyboard is captured by the app's `onKeyDownPortable` (App_shell forwards it):
 ## If touching the framework submodules
 
 Commit with `./git_wrapper` inside the submodule, not plain `git commit`. Keep
-changes small and documented. Record the commit and a patch in `patches/`.
-Never rewrite the vendored Python prototype.
+changes small and documented, push the library, then advance the pin here in the
+same change. The pins are the only record needed; this project does not carry
+framework patches. Never rewrite the vendored Python prototype.

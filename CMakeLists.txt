@@ -13,8 +13,6 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(TP_BUILD_TESTS "Build the pure-logic test executables (Debug only)" ON)
 option(TP_BUILD_GUI "Build the Vulkan/Wayland teleprompter window" ON)
-option(TP_APPLY_FRAMEWORK_PATCHES
-       "Apply the small App_shell/Vk_Canvas patches recorded in patches/" ON)
 
 include(CTest)
 
@@ -29,84 +27,12 @@ set(VK_CANVAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/firstparty/framework/Vk_Canv
 set(APP_SHELL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/firstparty/framework/App_shell"
     CACHE PATH "app_shell source root" FORCE)
 
-# The framework changes this port needs are kept as patches so a plain
-# `git submodule update --init --recursive` (which pins the upstream SHAs)
-# reproduces the build. Apply them idempotently at configure time, one patch
-# at a time: a patch already present in the tree is skipped, so extending the
-# series does not disturb a checkout configured against the shorter one.
-function(tp_apply_framework_series source_dir)
-    if(NOT EXISTS "${source_dir}/.git")
-        message(FATAL_ERROR
-            "${source_dir} is not initialized; run "
-            "`git submodule update --init --recursive` first")
-    endif()
-    set(patches ${ARGN})
-    if(NOT patches)
-        return()
-    endif()
-
-    # How much of the series the tree already carries. A patch can only be
-    # reverse-checked while the ones after it are absent (later patches touch
-    # context earlier ones added), so scan from the tail down: the first
-    # reverse-check that succeeds is the last applied patch, and everything
-    # before it is in the tree too.
-    list(LENGTH patches patch_count)
-    set(applied ${patch_count})
-    set(reversed ${patches})
-    list(REVERSE reversed)
-    foreach(patch IN LISTS reversed)
-        execute_process(
-            COMMAND git -C "${source_dir}" apply --reverse --check "${patch}"
-            RESULT_VARIABLE present
-            OUTPUT_QUIET ERROR_QUIET)
-        if(present EQUAL 0)
-            break()
-        endif()
-        math(EXPR applied "${applied} - 1")
-    endforeach()
-
-    set(index 0)
-    foreach(patch IN LISTS patches)
-        math(EXPR index "${index} + 1")
-        if(index LESS_EQUAL applied)
-            continue()
-        endif()
-        execute_process(
-            COMMAND git -C "${source_dir}" apply --check "${patch}"
-            RESULT_VARIABLE applicable
-            OUTPUT_QUIET ERROR_QUIET)
-        if(NOT applicable EQUAL 0)
-            message(FATAL_ERROR
-                "Framework patch does not apply: ${patch}\n"
-                "The submodule may have moved or be partially patched; reset it "
-                "with `git submodule update --force` and reconfigure, or pass "
-                "-DTP_APPLY_FRAMEWORK_PATCHES=OFF if it is already patched.")
-        endif()
-        execute_process(
-            COMMAND git -C "${source_dir}" apply "${patch}"
-            RESULT_VARIABLE apply_result
-            OUTPUT_QUIET ERROR_VARIABLE apply_err)
-        if(NOT apply_result EQUAL 0)
-            message(FATAL_ERROR "Could not apply ${patch}: ${apply_err}")
-        endif()
-        message(STATUS "Applied framework patch: ${patch}")
-    endforeach()
-endfunction()
-
 # A core-only build (TP_BUILD_GUI=OFF) must not need the submodules, the
 # Vulkan loader, Wayland or slangc: it exists so `core` and its tests can be
 # built on a machine that has none of them.
 if(TP_BUILD_GUI)
     if(WIN32 OR ANDROID)
         message(FATAL_ERROR "The first teleprompter slice is Linux/Wayland.")
-    endif()
-
-    if(TP_APPLY_FRAMEWORK_PATCHES)
-        file(GLOB TP_APP_SHELL_PATCHES "${CMAKE_CURRENT_SOURCE_DIR}/patches/000*-*.patch")
-        list(SORT TP_APP_SHELL_PATCHES)
-        tp_apply_framework_series("${APP_SHELL_DIR}" ${TP_APP_SHELL_PATCHES})
-        tp_apply_framework_series("${VK_CANVAS_DIR}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/patches/vk-canvas-0001-dispatch-timerfd.patch")
     endif()
 
     # What this application tells its shell.
