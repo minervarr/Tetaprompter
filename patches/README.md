@@ -1,8 +1,11 @@
 # Framework patches
 
-Two framework commits are not yet on `origin/main`; the superproject pins the
-commits used by this build, and these patches bring a fresh clone to the same
-state.
+The framework changes are kept as patches rather than pinned non-upstream
+commits, so a plain `git submodule update --init --recursive` reproduces the
+build. **CMake applies them idempotently at configure time**; the submodules
+will show as modified relative to upstream after a configure, which is
+expected. Pass `-DTP_APPLY_FRAMEWORK_PATCHES=OFF` if your checkout already has
+the changes.
 
 ## App_shell
 

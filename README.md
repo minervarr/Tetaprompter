@@ -145,12 +145,14 @@ scripts/                  build / run / verify helpers
   the shipped OTF faces into the per-size glyph cache the renderer uploads.
 - The original Python/GTK app is **not linked or run** by the C++ binary.
 
-The app calls one small addition to App_shell — `Host::setFullscreen()` — so the
-library can start windowed and the prompter can enter fullscreen without
-recreating the window. App_shell also gained a console-restore helper so
-`--print-timing` / `--check` still write to a pipe when launched without a TTY.
-Both commits are in the submodule checkout and mirrored as patches in
-`patches/`.
+The app calls small additions to the framework: `Host::setFullscreen()`,
+`WindowOptions::output` (Wayland connector selection), a console-restore helper
+for CLI modes without a TTY, and an optional extra fd in
+`WaylandDisplay::dispatch()` so the 16 ms scroll timer is not paced by the
+display's idle timeout. They are recorded as patches in `patches/`; CMake
+applies them idempotently to the pinned upstream submodules at configure time.
+If you already have the patched commits checked out, pass
+`-DTP_APPLY_FRAMEWORK_PATCHES=OFF`.
 
 ## Why the port looks different from the GTK app
 
