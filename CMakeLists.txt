@@ -8,6 +8,8 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(TP_BUILD_TESTS "Build the pure-logic test executables" ON)
 option(TP_BUILD_GUI "Build the Vulkan/Wayland teleprompter window" ON)
+option(TP_APPLY_FRAMEWORK_PATCHES
+       "Apply the small App_shell/Vk_Canvas patches recorded in patches/" ON)
 
 include(CTest)
 
@@ -18,6 +20,60 @@ set(VK_CANVAS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/firstparty/framework/Vk_Canv
     CACHE PATH "vk_canvas source root (consumed by app_shell too)" FORCE)
 set(APP_SHELL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/firstparty/framework/App_shell"
     CACHE PATH "app_shell source root" FORCE)
+
+# The two framework commits this port needs are kept as patches so a plain
+# `git submodule update --init --recursive` (which pins the upstream SHAs)
+# reproduces the build. Apply them idempotently at configure time. Reverse
+# --check first: if a developer already has the patched commits checked out,
+# there is nothing to do.
+function(tp_apply_framework_series source_dir)
+    if(NOT EXISTS "${source_dir}/.git")
+        message(FATAL_ERROR
+            "${source_dir} is not initialized; run "
+            "`git submodule update --init --recursive` first")
+    endif()
+    set(patches ${ARGN})
+    if(NOT patches)
+        return()
+    endif()
+    list(GET patches -1 last_patch)
+    execute_process(
+        COMMAND git -C "${source_dir}" apply --reverse --check "${last_patch}"
+        RESULT_VARIABLE already
+        OUTPUT_QUIET ERROR_QUIET)
+    if(already EQUAL 0)
+        return()
+    endif()
+    foreach(patch IN LISTS patches)
+        execute_process(
+            COMMAND git -C "${source_dir}" apply --check "${patch}"
+            RESULT_VARIABLE applicable
+            OUTPUT_QUIET ERROR_QUIET)
+        if(NOT applicable EQUAL 0)
+            message(FATAL_ERROR
+                "Framework patch does not apply: ${patch}\n"
+                "The submodule may have moved or be partially patched; reset it "
+                "with `git submodule update --force` and reconfigure, or pass "
+                "-DTP_APPLY_FRAMEWORK_PATCHES=OFF if it is already patched.")
+        endif()
+        execute_process(
+            COMMAND git -C "${source_dir}" apply "${patch}"
+            RESULT_VARIABLE applied
+            OUTPUT_QUIET ERROR_VARIABLE apply_err)
+        if(NOT applied EQUAL 0)
+            message(FATAL_ERROR "Could not apply ${patch}: ${apply_err}")
+        endif()
+        message(STATUS "Applied framework patch: ${patch}")
+    endforeach()
+endfunction()
+
+if(TP_APPLY_FRAMEWORK_PATCHES)
+    file(GLOB TP_APP_SHELL_PATCHES "${CMAKE_CURRENT_SOURCE_DIR}/patches/000*-*.patch")
+    list(SORT TP_APP_SHELL_PATCHES)
+    tp_apply_framework_series("${APP_SHELL_DIR}" ${TP_APP_SHELL_PATCHES})
+    tp_apply_framework_series("${VK_CANVAS_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/patches/vk-canvas-0001-dispatch-timerfd.patch")
+endif()
 
 # What this application tells its shell.
 set(APP_SHELL_STATE_HOME ".local/state/teleprompter" CACHE STRING "" FORCE)
