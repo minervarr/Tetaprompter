@@ -123,7 +123,8 @@ const FontPreset* find_font_preset(std::string_view id) {
         wanted == "new-computer-modern") {
         return &font_presets()[0];
     }
-    if (wanted == "dyslexic" || wanted == "open-dyslexic" || wanted == "opendyslexic") {
+    if (wanted == "dyslexic" || wanted == "open-dyslexic" || wanted == "opendyslexic" ||
+        wanted == "opendix" || wanted == "open-dix") {
         return &font_presets()[1];
     }
     return nullptr;
