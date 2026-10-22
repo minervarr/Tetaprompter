@@ -1,0 +1,8 @@
+add_executable(teleprompter_core_tests core_tests.cc)
+target_link_libraries(teleprompter_core_tests PRIVATE teleprompter_core)
+if(MSVC)
+    target_compile_options(teleprompter_core_tests PRIVATE /W3 /utf-8)
+else()
+    target_compile_options(teleprompter_core_tests PRIVATE -Wall -Wextra)
+endif()
+add_test(NAME teleprompter_core_tests COMMAND teleprompter_core_tests)

@@ -1,0 +1,11 @@
+build/
+build-*/
+*.pyz
+__pycache__/
+*.pyc
+recordings/
+*.ppm
+*.png
+!docs/screenshot.png
+.teleprompter-*
+prototype/.venv/
