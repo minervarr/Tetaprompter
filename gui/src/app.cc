@@ -19,7 +19,9 @@
 #include "renderer.hh"
 #include "raster_font.hh"
 #include "teleprompter/colour.hh"
+#include "teleprompter/settings.hh"
 #include "teleprompter/script.hh"
+#include "fonts.hh"
 
 namespace tp {
 namespace {
@@ -66,6 +68,7 @@ const std::vector<std::pair<std::string, std::string>>& key_help() {
         {"A", "Toggle centred / flush-left text"},
         {"K", "Toggle word-by-word karaoke fill"},
         {"M", "Toggle mood colours"},
+        {"T", "Choose the script font"},
         {"← / →", "Nudge the text"},
         {"Home / End", "Jump to the top / bottom"},
         {"F5 or L", "Reload the script file"},
@@ -118,12 +121,28 @@ bool App::create() {
     fullscreen_ = !options_.windowed;
     compute_font();
 
-    std::string font_error;
-    if (!text_.load(*host_, font_error)) {
-        host_->showErrorMessage("Font error", font_error);
-        std::fprintf(stderr, "error: %s\n", font_error.c_str());
-        return false;
+    std::string requested_font = options_.font;
+    if (requested_font.empty()) requested_font = load_font_setting();
+    if (requested_font.empty()) requested_font = "newcm";
+    gui::FontPreset font_preset;
+    std::string font_choice_error;
+    if (!gui::make_font_preset(requested_font, font_preset, font_choice_error)) {
+        startup_font_error_ = font_choice_error + " — using New Computer Modern";
+        font_preset = *gui::find_font_preset("newcm");
     }
+
+    std::string font_error;
+    if (!text_.load(*host_, font_preset, font_error)) {
+        // A missing/broken chosen face must not prevent the app from opening.
+        startup_font_error_ = font_error + " — using New Computer Modern";
+        font_preset = *gui::find_font_preset("newcm");
+        if (!text_.load(*host_, font_preset, font_error)) {
+            host_->showErrorMessage("Font error", font_error);
+            std::fprintf(stderr, "error: %s\n", font_error.c_str());
+            return false;
+        }
+    }
+    current_font_ = font_preset;
     if (!create_renderer()) return false;
 
     recorder_ = std::make_unique<Recorder>(RecorderOptions{
@@ -140,8 +159,10 @@ bool App::create() {
     if (!options_.script.empty()) {
         open_script(options_.script, false);
     }
+    if (!startup_font_error_.empty()) show_message(startup_font_error_, true, 10.0);
     if (options_.demo_help) help_visible_ = true;
     if (options_.demo_picker) open_picker();
+    if (options_.demo_font) open_font_menu();
     if (options_.record_test_seconds > 0.0) {
         record_test_ = true;
         start_recording();
@@ -266,6 +287,46 @@ void App::open_picker() {
     picker_scroll_ = 0;
     load_picker();
     needs_redraw_ = true;
+}
+
+void App::open_font_menu() {
+    if (rec_phase_ != RecPhase::Idle) {
+        show_message("Stop recording before changing fonts", true);
+        return;
+    }
+    if (playing_) toggle_play();
+    help_visible_ = false;
+    picker_open_ = false;
+    font_menu_open_ = true;
+    font_menu_selected_ = 0;
+    const auto& presets = gui::font_presets();
+    for (std::size_t i = 0; i < presets.size(); ++i) {
+        if (presets[i].id == current_font_.id) font_menu_selected_ = static_cast<int>(i);
+    }
+    text_.collect("Script font");
+    text_.collect("Enter applies · Esc closes");
+    for (const gui::FontPreset& preset : presets) text_.collect(preset.label);
+    needs_redraw_ = true;
+}
+
+void App::apply_font(const gui::FontPreset& preset, bool persist, bool announce) {
+    std::string error;
+    if (!text_.reload(*host_, preset, error)) {
+        show_message("Font error: " + error, true);
+        return;
+    }
+    current_font_ = preset;
+    if (persist) {
+        const std::string saved = preset.id.rfind("custom:", 0) == 0
+            ? preset.regular : preset.id;
+        save_font_setting(saved);
+    }
+    msdf_initialized_ = false;
+    collect_all_text();
+    sync_font();
+    layout_dirty_ = true;
+    needs_redraw_ = true;
+    if (announce) show_message("Font: " + preset.label);
 }
 
 void App::load_picker() {
@@ -511,7 +572,7 @@ void App::rebuild_layout() {
     metrics.width = static_cast<float>(renderer_->width());
     metrics.height = static_cast<float>(renderer_->height());
     metrics.cue_y = metrics.height * cue_fraction_;
-    metrics.font_px = script_px_;
+    metrics.font_px = script_px_ * current_font_.size_scale;
     metrics.centered = centered_;
     layout_ = gui::build_script_layout(plan_, text_, metrics);
     layout_width_ = renderer_->width();
@@ -843,7 +904,7 @@ bool is_toggle_key(int key) {
     switch (key) {
     case key::Space: case 0x52: case 0x46: case 0x48: case 0x4C:
     case 0x43: case 0x41: case 0x4B: case 0x4D: case key::F1:
-    case 0x74: case 0x7A: case 0x3F:
+    case 0x74: case 0x7A: case 0x3F: case 0x54:
         return true;
     default:
         return false;
@@ -867,6 +928,42 @@ void App::onKeyDownPortable(int keyCode) {
     }
     if (help_visible_) {
         help_visible_ = false;
+        needs_redraw_ = true;
+        return;
+    }
+    if (font_menu_open_) {
+        const auto& presets = gui::font_presets();
+        switch (keyCode) {
+        case key::Escape:
+            font_menu_open_ = false;
+            break;
+        case 0x54: // T
+            if (!repeated) font_menu_open_ = false;
+            break;
+        case key::Up:
+            font_menu_selected_ = std::max(0, font_menu_selected_ - 1);
+            break;
+        case key::Down:
+            font_menu_selected_ = std::min(static_cast<int>(presets.size()) - 1,
+                                           font_menu_selected_ + 1);
+            break;
+        case key::Home:
+            font_menu_selected_ = 0;
+            break;
+        case key::End:
+            font_menu_selected_ = static_cast<int>(presets.size()) - 1;
+            break;
+        case key::Enter: {
+            const int index = std::max(0, std::min(font_menu_selected_,
+                                                  static_cast<int>(presets.size()) - 1));
+            const gui::FontPreset preset = presets[static_cast<std::size_t>(index)];
+            font_menu_open_ = false;
+            apply_font(preset, true);
+            break;
+        }
+        default:
+            break;
+        }
         needs_redraw_ = true;
         return;
     }
@@ -925,6 +1022,11 @@ void App::onKeyDownPortable(int keyCode) {
             needs_redraw_ = true;
             return;
         }
+        if (keyCode == 0x54) { // T
+            if (repeated) return;
+            open_font_menu();
+            return;
+        }
         if (library_entries_.empty()) return;
         if (keyCode == key::Up) {
             library_selected_ = std::max(0, library_selected_ - 1);
@@ -966,6 +1068,7 @@ void App::onKeyDownPortable(int keyCode) {
         if (!hud_visible_) hud_dimmed_ = false;
         needs_redraw_ = true;
         break;
+    case 0x54: open_font_menu(); break; // T
     case 0x43: cycle_cue(); break; // C
     case 0x41: centered_ = !centered_; layout_dirty_ = true;
         show_message(centered_ ? "Text: centred" : "Text: left-aligned"); break;
@@ -1020,6 +1123,22 @@ void App::onLButtonDown(int x, int y) {
         needs_redraw_ = true;
         return;
     }
+    if (font_menu_open_) {
+        for (const Hit& hit : hits_) {
+            if (hit.id.rfind("font:", 0) == 0 && hit.contains(fx, fy)) {
+                const int index = std::atoi(hit.id.c_str() + 5);
+                const auto& presets = gui::font_presets();
+                if (index >= 0 && index < static_cast<int>(presets.size())) {
+                    font_menu_open_ = false;
+                    apply_font(presets[static_cast<std::size_t>(index)], true);
+                }
+                return;
+            }
+        }
+        font_menu_open_ = false;
+        needs_redraw_ = true;
+        return;
+    }
     if (picker_open_) {
         for (const Hit& hit : hits_) {
             if (hit.id.rfind("pick:", 0) == 0 && hit.contains(fx, fy)) {
@@ -1043,6 +1162,8 @@ void App::onLButtonDown(int x, int y) {
     if (hit == nullptr) return;
     if (hit->id == "open") {
         open_picker();
+    } else if (hit->id == "font") {
+        open_font_menu();
     } else if (hit->id == "home") {
         go_home();
     } else if (hit->id == "record") {
@@ -1067,6 +1188,7 @@ void App::onLButtonUp(int, int) {}
 void App::onMouseWheel(int x, int y, int delta) {
     (void)x;
     (void)y;
+    if (font_menu_open_) return;
     if (picker_open_) {
         picker_selected_ = std::max(0, std::min(static_cast<int>(picker_entries_.size()) - 1,
                                              picker_selected_ - (delta > 0 ? 1 : -1)));
@@ -1094,6 +1216,7 @@ void App::collect_all_text() {
         "Mood colours on", "Mood colours off", "Recent scripts refreshed",
         "No scripts here", "Enter opens · Backspace up · Esc closes",
         "Keyboard shortcuts", "Esc or ? closes this card", "SAMPLE", "Hold",
+        "Script font", "Font", "Enter applies · Esc closes", "Current",
     };
     for (const char* text : fixed) text_.collect(text);
     for (const auto& [keys, description] : key_help()) {
@@ -1114,6 +1237,8 @@ void App::collect_all_text() {
         text_.collect(entry.meta);
     }
     for (const PickerEntry& entry : picker_entries_) text_.collect(entry.name);
+    for (const gui::FontPreset& preset : gui::font_presets()) text_.collect(preset.label);
+    text_.collect(current_font_.label);
     text_.collect(picker_dir_);
     text_.collect(message_);
     text_.collect(theme_text());
@@ -1125,9 +1250,10 @@ void App::sync_font() {
     if (text_.has_misses()) {
         if (text_.bake_misses() > 0) renderer_->initMsdf(*text_.font());
     }
-    const int direction = static_cast<int>(std::lround(script_px_ * 0.68f));
+    const float effective_script = script_px_ * current_font_.size_scale;
+    const int direction = static_cast<int>(std::lround(effective_script * 0.68f));
     const int added = text_.ensure({
-        static_cast<int>(std::lround(script_px_)), direction,
+        static_cast<int>(std::lround(effective_script)), direction,
         10, 11, 12, 13, 14, 15, 16, 18, 19, 22, 26, 30});
     if (added > 0 || !msdf_initialized_) {
         renderer_->initMsdf(*text_.font());
@@ -1184,6 +1310,8 @@ void App::draw_frame() {
 
     if (help_visible_) {
         draw_help(canvas);
+    } else if (font_menu_open_) {
+        draw_font_menu(canvas);
     } else if (picker_open_) {
         draw_picker(canvas);
     } else if (is_prompter()) {
@@ -1230,6 +1358,14 @@ void App::draw_library(Canvas& canvas) {
 
     const float open_w = 190.0f;
     const float open_x = width - 38.0f - open_w;
+    const float font_w = std::min(230.0f, std::max(150.0f, open_x - 38.0f - 180.0f));
+    const float font_x = open_x - 14.0f - font_w;
+    canvas.rect(font_x, 32, font_w, 42, rgb(kPanel), 10);
+    canvas.rect(font_x, 32, font_w, 1, rgb(parse_hex("#3a3a42")));
+    canvas.rect(font_x, 73, font_w, 1, rgb(parse_hex("#3a3a42")));
+    add_hit("font", font_x, 32, font_w, 42);
+    put_text(preview_text("Font: " + current_font_.label, 26), font_x + 14, 43, 13,
+             parse_hex("#cfcfcf"));
     canvas.rect(open_x, 32, open_w, 42, rgb(kAmber), 10);
     add_hit("open", open_x, 32, open_w, 42);
     put_text("Open script", open_x + open_w * 0.5f, 43, 15, parse_hex("#141414"),
@@ -1361,13 +1497,22 @@ void App::draw_script(Canvas& canvas) {
     const float dy = cue_y - static_cast<float>(scroll_);
     const float width = static_cast<float>(canvas.w());
     const float height = static_cast<float>(canvas.h());
-    const float top_clip = hud_visible_ ? 80.0f : 0.0f;
+    float top_clip = 0.0f;
+    if (hud_visible_) {
+        top_clip = 80.0f;
+        if (message_visible()) top_clip = 100.0f;
+        if (!at_end_ && total_weight_ > 0.0) {
+            const std::optional<SectionState> section =
+                section_state(plan_, w_, &paragraph_starts_);
+            if (section && section->remaining > 1e-9) top_clip = 146.0f;
+        }
+    }
     canvas.setClip(0, top_clip, width, height - top_clip);
 
     for (const gui::PlacedParagraph& paragraph : layout_.paragraphs) {
         if (!paragraph.direction || paragraph.card_w <= 0) continue;
         const float y = paragraph.card_y + dy;
-        if (y > height || y + paragraph.card_h < 0) continue;
+        if (y > height || y + paragraph.card_h < 0 || y < top_clip) continue;
         canvas.rect(paragraph.card_x, y, paragraph.card_w, paragraph.card_h,
                     ::Color{0.14f, 0.11f, 0.06f, 0.92f}, 8);
         canvas.rect(paragraph.card_x, y, 4, paragraph.card_h,
@@ -1382,10 +1527,10 @@ void App::draw_script(Canvas& canvas) {
         if (!word.comment || word.direction) continue;
         for (const gui::PlacedLine& line : word.lines) {
             const float y = line.center + dy;
-            const float h = script_px_ * 1.24f;
+            const float h = effective_script_px() * 1.24f;
             const float x = line.x0 - 4.0f;
             const float w = std::max(2.0f, line.x1 - line.x0 + 8.0f);
-            if (y + h < 0 || y - h > height) continue;
+            if (y + h < 0 || y - h > height || y - h * 0.5f < top_clip) continue;
             canvas.rect(x, y - h * 0.5f, w, h, ::Color{0.16f, 0.13f, 0.08f, 0.96f}, 5);
         }
     }
@@ -1396,6 +1541,10 @@ void App::draw_script(Canvas& canvas) {
         glyph.y0 += dy;
         glyph.y1 += dy;
         glyph.line_center += dy;
+        if (!glyph.draw) continue;
+        // Drop a whole glyph rather than clipping it at the overlay band: half
+        // a letter peeking out from under the HUD reads as a rendering bug.
+        if (glyph.line_center < top_clip) continue;
         frame.push_back(glyph);
     }
     std::vector<::Color> colours(frame.size(), ::Color{1, 1, 1, 1});
@@ -1438,9 +1587,9 @@ void App::draw_cue_bars(Canvas& canvas) {
     const float width = static_cast<float>(canvas.w());
     const float height = static_cast<float>(canvas.h());
     const float cue_y = height * cue_fraction_;
-    const float side = std::max(script_px_, (width - layout_.column_width) * 0.5f);
+    const float side = std::max(effective_script_px(), (width - layout_.column_width) * 0.5f);
     const float bar_w = std::max(12.0f, side - 8.0f);
-    const float bar_h = std::max(3.0f, script_px_ * 0.09f);
+    const float bar_h = std::max(3.0f, effective_script_px() * 0.09f);
     const float y = cue_y - bar_h * 0.5f;
     canvas.rect(4, y, bar_w, bar_h, ::Color{0.94f, 0.63f, 0.24f, 0.90f}, 3);
     canvas.rect(width - 4 - bar_w, y, bar_w, bar_h, ::Color{0.94f, 0.63f, 0.24f, 0.90f}, 3);
@@ -1473,9 +1622,6 @@ void App::draw_hud(Canvas& canvas) {
     const ::Color panel{0.07f, 0.07f, 0.07f, 0.62f * alpha};
 
     canvas.rect(kHudMargin, kHudMargin, width - 2 * kHudMargin, kHudHeight, panel, 12);
-    text_.append_rect(text_quads_, kHudMargin + 9, kHudMargin + 4,
-                      width - 2 * kHudMargin - 18, kHudHeight - 8,
-                      ::Color{0.035f, 0.035f, 0.04f, 0.97f});
 
     // Scripts
     canvas.rect(18, 18, 96, 34, ::Color{1, 1, 1, 0.06f * alpha}, 8);
@@ -1540,8 +1686,6 @@ void App::draw_hud(Canvas& canvas) {
         const float msg_w = std::min(width - 40.0f,
             text_.width(message_, 13, FontStyle::Roman) + 24.0f);
         canvas.rect(18, 66, msg_w, 28, ::Color{0.06f, 0.06f, 0.06f, 0.82f * alpha}, 8);
-        text_.append_rect(text_quads_, 23, 69, msg_w - 10, 22,
-                          ::Color{0.025f, 0.025f, 0.03f, 0.98f});
         put_text(message_, 30, 72, 13,
                  message_error_ ? parse_hex("#ff8a80") : parse_hex("#cfcfcf"),
                  FontStyle::Roman, alpha);
@@ -1561,8 +1705,6 @@ void App::draw_section(Canvas& canvas) {
     const float x = (width - card_w) * 0.5f;
     const float y = 70.0f;
     canvas.rect(x, y, card_w, card_h, ::Color{0.08f, 0.06f, 0.03f, 0.95f}, 10);
-    text_.append_rect(text_quads_, x + 8, y + 4, card_w - 16, card_h - 8,
-                      ::Color{0.055f, 0.04f, 0.02f, 0.98f});
     canvas.rect(x, y, card_w, 1, ::Color{0.94f, 0.63f, 0.24f, 0.38f});
     canvas.rect(x, y + card_h - 1, card_w, 1, ::Color{0.94f, 0.63f, 0.24f, 0.38f});
     canvas.rect(x, y, 1, card_h, ::Color{0.94f, 0.63f, 0.24f, 0.38f});
@@ -1578,6 +1720,45 @@ void App::draw_section(Canvas& canvas) {
     canvas.rect(x + 14, y + 46, card_w - 28, 4, ::Color{1, 1, 1, 0.12f}, 2);
     canvas.rect(x + 14, y + 46, (card_w - 28) * static_cast<float>(state->progress), 4,
                 ::Color{0.94f, 0.63f, 0.24f, 1.0f}, 2);
+}
+
+void App::draw_font_menu(Canvas& canvas) {
+    const float width = static_cast<float>(canvas.w());
+    const float height = static_cast<float>(canvas.h());
+    canvas.clear(rgb(parse_hex("#050506")));
+    canvas.rect(0, 0, width, height, ::Color{0, 0, 0, 0.74f});
+
+    const auto& presets = gui::font_presets();
+    const float panel_w = std::min(660.0f, width - 60.0f);
+    const float panel_h = std::min(360.0f, height - 60.0f);
+    const float x = (width - panel_w) * 0.5f;
+    const float y = (height - panel_h) * 0.5f;
+    canvas.rect(x, y, panel_w, panel_h, rgb(parse_hex("#18181b")), 16);
+    canvas.rect(x, y, panel_w, 1, rgb(parse_hex("#3a3a42")));
+    canvas.rect(x, y + panel_h - 1, panel_w, 1, rgb(parse_hex("#3a3a42")));
+
+    put_text("Script font", x + 28, y + 20, 19, kText, FontStyle::Bold);
+    put_text("Choose the face used by the script, HUD and library.",
+             x + 28, y + 50, 13, kDim);
+
+    const float row_h = 52.0f;
+    const float first = y + 84.0f;
+    for (std::size_t i = 0; i < presets.size(); ++i) {
+        const float row_y = first + static_cast<float>(i) * row_h;
+        const bool selected = static_cast<int>(i) == font_menu_selected_;
+        const bool current = presets[i].id == current_font_.id;
+        if (selected) {
+            canvas.rect(x + 16, row_y, panel_w - 32, row_h - 6, rgb(parse_hex("#2a2114")), 8);
+        }
+        put_text(presets[i].label, x + 32, row_y + 9, 16,
+                 selected ? kAmberLit : kText, FontStyle::Bold);
+        if (current) {
+            put_text("Current", x + panel_w - 92, row_y + 12, 12, kAmber);
+        }
+        add_hit("font:" + std::to_string(i), x + 16, row_y, panel_w - 32, row_h - 6);
+    }
+
+    put_text("Enter applies · Esc closes", x + 28, y + panel_h - 32, 12, kFaint);
 }
 
 void App::draw_help(Canvas& canvas) {

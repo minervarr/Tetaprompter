@@ -7,5 +7,6 @@ recordings/
 *.ppm
 *.png
 !docs/screenshot.png
+!docs/screenshot-opendyslexic.png
 .teleprompter-*
 prototype/.venv/

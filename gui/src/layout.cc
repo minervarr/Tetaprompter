@@ -26,9 +26,12 @@ struct Line {
     float width = 0.0f;
 };
 
-float line_height_for(const Paragraph& paragraph, float font_px) {
-    return paragraph.is_direction ? std::max(14.0f, std::round(font_px * 0.68f)) * 1.3f
-                                  : font_px * 1.35f;
+float line_height_for(const Paragraph& paragraph, float font_px, const TextPainter& painter) {
+    if (paragraph.is_direction) {
+        const float size = std::max(14.0f, std::round(font_px * 0.68f));
+        return std::max(size * 1.3f, painter.line_height(size));
+    }
+    return painter.line_height(font_px);
 }
 
 
@@ -188,7 +191,7 @@ ScriptLayout build_script_layout(const std::vector<Paragraph>& plan, TextPainter
     layout.word_seconds.assign(static_cast<std::size_t>(total_words), 0.0f);
     layout.words.reserve(static_cast<std::size_t>(total_words));
 
-    const float gap = metrics.font_px * 1.35f;
+    const float gap = painter.line_height(metrics.font_px);
     float current_y = 0.0f;
     bool first_paragraph = true;
     int flat = 0;
@@ -196,7 +199,7 @@ ScriptLayout build_script_layout(const std::vector<Paragraph>& plan, TextPainter
 
     for (std::size_t p_index = 0; p_index < plan.size(); ++p_index) {
         const Paragraph& paragraph = plan[p_index];
-        const float line_h = line_height_for(paragraph, metrics.font_px);
+        const float line_h = line_height_for(paragraph, metrics.font_px, painter);
         const float size = paragraph.is_direction ? layout.direction_px : metrics.font_px;
         const float pad_x = paragraph.is_direction ? 16.0f : 0.0f;
         const float pad_y = paragraph.is_direction ? 9.0f : 0.0f;
@@ -312,7 +315,7 @@ ScriptLayout build_script_layout(const std::vector<Paragraph>& plan, TextPainter
         const PlacedParagraph& placed = layout.paragraphs[p_index];
         const Paragraph& source = plan[p_index];
         const float fallback = placed.direction ? placed.top + placed.card_h * 0.5f
-                                                : placed.top + line_height_for(source, metrics.font_px) * 0.5f;
+                                                : placed.top + line_height_for(source, metrics.font_px, painter) * 0.5f;
         int base = 0;
         for (std::size_t q = 0; q < p_index; ++q) base += static_cast<int>(plan[q].words.size());
         for (std::size_t w = 0; w < source.words.size(); ++w) {

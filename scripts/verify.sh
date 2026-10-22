@@ -30,7 +30,10 @@ if [ -n "${WAYLAND_DISPLAY:-}" ]; then
     ./build/gui/teleprompter --seek 8 --capture /tmp/teleprompter-verify.ppm \
         samples/test-script.txt >/dev/null 2>&1
     test -s /tmp/teleprompter-verify.ppm
-    echo "capture: /tmp/teleprompter-verify.ppm"
+    ./build/gui/teleprompter --font opendyslexic --seek 8 \
+        --capture /tmp/teleprompter-verify-od.ppm samples/test-script.txt >/dev/null 2>&1
+    test -s /tmp/teleprompter-verify-od.ppm
+    echo "captures: /tmp/teleprompter-verify.ppm /tmp/teleprompter-verify-od.ppm"
 fi
 
 echo "== done"

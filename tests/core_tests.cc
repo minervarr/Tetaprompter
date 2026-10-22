@@ -2,6 +2,7 @@
 #include "teleprompter/colour.hh"
 #include "teleprompter/recents.hh"
 #include "teleprompter/recorder.hh"
+#include "teleprompter/settings.hh"
 
 #include <cstdlib>
 #include <cmath>
@@ -173,6 +174,23 @@ static void formatting() {
     CHECK(near(character_fill(0.375, 2, 4), 0.0));
 }
 
+static void settings_round_trip() {
+    const std::string dir = "/tmp/teleprompter-vk-settings";
+    std::filesystem::create_directories(dir);
+    const char* old_state = std::getenv("XDG_STATE_HOME");
+    const std::string old_value = old_state != nullptr ? old_state : "";
+    ::setenv("XDG_STATE_HOME", dir.c_str(), 1);
+    CHECK(load_font_setting().empty());
+    CHECK(save_font_setting("opendyslexic"));
+    CHECK(load_font_setting() == "opendyslexic");
+    CHECK(save_font_setting("newcm"));
+    CHECK(load_font_setting() == "newcm");
+    std::filesystem::remove(settings_path());
+    CHECK(load_font_setting().empty());
+    if (old_state != nullptr) ::setenv("XDG_STATE_HOME", old_value.c_str(), 1);
+    else ::unsetenv("XDG_STATE_HOME");
+}
+
 static void recents_round_trip() {
     const std::string dir = "/tmp/teleprompter-vk-test";
     std::filesystem::create_directories(dir);
@@ -202,6 +220,7 @@ int main() {
     timeline_math();
     formatting();
     sample_score();
+    settings_round_trip();
     recents_round_trip();
     std::puts("teleprompter_core_tests: OK");
     return 0;

@@ -19,6 +19,8 @@ rendering/input stack.
 | GTK HUD, cards, section card, help, library | `gui/src/app.cc` immediate-mode draw |
 | GTK `ScrolledWindow` + adjustment | `Timeline` + `scroll_` + `draw_script` |
 | GTK FileDialog | built-in picker in `gui/src/app.cc` |
+| font selection | `gui/src/fonts.{hh,cc}` + `TextPainter::reload()` |
+| font preference | `core/src/settings.cc` (`settings.json`) |
 | `Gtk.Application.inhibit` (IDLE) | `Host::setKeepAwake()` |
 | `Gtk.ApplicationWindow` fullscreen | `Host::setFullscreen()` (App_shell addition) |
 
@@ -33,6 +35,15 @@ rendering/input stack.
   `Teleprompter`.
 - **No GTK icon theme.** Buttons use text/simple shapes rather than symbolic
   icons. The HUD remains recognisable and the behavior is unchanged.
+- **Fonts are explicit presets.** New Computer Modern Sans is the default;
+  OpenDyslexic is a second preset with a 0.70 size factor and New Computer
+  Modern fallbacks for the em dash, ellipsis and arrows it lacks. The selected
+  face applies to script, HUD, library and help; stage directions remain in the
+  mono face. `T`/the library button/`--font` choose it.
+- **Text quality stays on RasterFont.** It rasterizes the actual Bézier outlines
+  per size (8-bit coverage, subpixel phases), which is the highest-quality path
+  for this fixed-size UI. MTSDF is not used because it would be softer at HUD
+  sizes; the engine still has it for consumers that need continuous scaling.
 - **No Pango markup re-parse at draw time.** `**bold**` / `*italic*` are turned
   into per-word style flags while parsing; the plain display text and byte
   offsets remain the authority.
@@ -89,6 +100,9 @@ Patches are in `patches/`; the submodule pins the commits used by this build.
 - Vulkan capture at 1180×760 and fullscreen 1920×1080: library, prompter,
   stable README screenshot, section card at 8 s, end state at 22.5 s, inline
   comment chip, bold/italic, key-map and picker cards.
+- Both font presets captured on DP-2 (1080×1920): New Computer Modern and
+  OpenDyslexic, including em dash / ellipsis / arrow fallback, the font menu,
+  inline comment chip and a saved `settings.json` selection.
 - `--check`: camera `/dev/video0` + microphone `default` OK.
 - `--record-test 3`: produced a 1280×720 H.264/AAC MP4, `ffprobe` verified the
   video stream at 30/1 and an AAC 48 kHz stereo stream. Audio startup latency on

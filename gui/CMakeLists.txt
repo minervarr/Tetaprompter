@@ -2,7 +2,8 @@ add_executable(teleprompter
     src/main.cc
     src/app.cc
     src/text.cc
-    src/layout.cc)
+    src/layout.cc
+    src/fonts.cc)
 
 target_link_libraries(teleprompter PRIVATE
     teleprompter_core
@@ -26,9 +27,7 @@ add_custom_target(teleprompter_assets ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory
             $<TARGET_FILE_DIR:teleprompter>/assets
     COMMAND ${CMAKE_COMMAND} -E make_directory
-            $<TARGET_FILE_DIR:teleprompter>/fonts/ui
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-            $<TARGET_FILE_DIR:teleprompter>/fonts/mono
+            $<TARGET_FILE_DIR:teleprompter>/fonts
     COMMAND ${CMAKE_COMMAND} -E make_directory
             $<TARGET_FILE_DIR:teleprompter>/samples
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -37,11 +36,8 @@ add_custom_target(teleprompter_assets ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_BINARY_DIR}/assets $<TARGET_FILE_DIR:teleprompter>/assets
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${CMAKE_SOURCE_DIR}/assets/fonts/ui
-            $<TARGET_FILE_DIR:teleprompter>/fonts/ui
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${CMAKE_SOURCE_DIR}/assets/fonts/mono
-            $<TARGET_FILE_DIR:teleprompter>/fonts/mono
+            ${CMAKE_SOURCE_DIR}/assets/fonts
+            $<TARGET_FILE_DIR:teleprompter>/fonts
     COMMENT "Copying shaders and fonts next to teleprompter")
 add_dependencies(teleprompter_assets compile_font_shaders compile_canvas_shaders)
 add_dependencies(teleprompter teleprompter_assets)

@@ -1,5 +1,7 @@
 #include "text.hh"
 
+#include "fonts.hh"
+
 #include <algorithm>
 #include <cmath>
 #include <memory>
@@ -16,35 +18,62 @@ namespace tp::gui {
     return ::Color{c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, alpha};
 }
 
-TextPainter::~TextPainter() {
-    delete font_;
+TextPainter::~TextPainter() = default;
+
+namespace {
+std::string data_path(const Host& host, const std::string& path) {
+    if (path.empty() || path.front() == '/') return path;
+    return host.exeDir() + path;
 }
+} // namespace
 
-bool TextPainter::load(Host& host, std::string& error) {
-    font_ = new RasterFont();
-    const std::string dir = host.exeDir();
-    const std::string regular = dir + "fonts/ui/NewCMSans10-Regular.otf";
-    if (!font_->open(host.dataReader(), regular.c_str())) {
-        error = "cannot open " + regular;
-        delete font_;
-        font_ = nullptr;
-        return false;
-    }
-    font_->addStyle(host.dataReader(), (dir + "fonts/ui/NewCMSans10-Bold.otf").c_str(),
-                    FontStyle::Bold);
-    font_->addStyle(host.dataReader(), (dir + "fonts/ui/NewCMSans10-Oblique.otf").c_str(),
-                    FontStyle::Italic);
-    font_->addStyle(host.dataReader(), (dir + "fonts/mono/NewCMMono10-Regular.otf").c_str(),
-                    FontStyle::Math);
-
+bool TextPainter::load(Host& host, const FontPreset& preset, std::string& error) {
     // Every printable ASCII codepoint is cheap and makes the UI independent of
     // which script happens to be open this second.
     for (uint32_t cp = 32; cp < 127; ++cp) codepoints_.insert(cp);
     codepoints_.insert(0x2014); // em dash
     codepoints_.insert(0x2026); // ellipsis
     codepoints_.insert(0x00B7); // middot
+    for (uint32_t cp = 0x2190; cp <= 0x2193; ++cp) codepoints_.insert(cp);
+    return reload(host, preset, error);
+}
+
+bool TextPainter::open_faces(Host& host, const FontPreset& preset, std::string& error) {
+    auto next = std::make_unique<RasterFont>();
+    const std::string regular = data_path(host, preset.regular);
+    if (regular.empty() || !next->open(host.dataReader(), regular.c_str())) {
+        error = "cannot open " + (regular.empty() ? std::string("regular font") : regular);
+        return false;
+    }
+    const std::string bold = data_path(host, preset.bold);
+    const std::string italic = data_path(host, preset.italic);
+    const std::string mono = data_path(host, preset.mono);
+    if (!bold.empty()) next->addStyle(host.dataReader(), bold.c_str(), FontStyle::Bold);
+    if (!italic.empty()) next->addStyle(host.dataReader(), italic.c_str(), FontStyle::Italic);
+    if (!mono.empty()) next->addStyle(host.dataReader(), mono.c_str(), FontStyle::Math);
+
+    // Missing codepoints (OpenDyslexic has no em dash, ellipsis or arrows) go
+    // to the fallback face for the matching style.
+    const std::string fallback_regular = data_path(host, preset.fallback_regular);
+    const std::string fallback_bold = data_path(host, preset.fallback_bold);
+    const std::string fallback_italic = data_path(host, preset.fallback_italic);
+    if (!fallback_regular.empty()) {
+        next->addFallback(host.dataReader(), fallback_regular.c_str(), FontStyle::Roman);
+    }
+    if (!fallback_bold.empty()) {
+        next->addFallback(host.dataReader(), fallback_bold.c_str(), FontStyle::Bold);
+    }
+    if (!fallback_italic.empty()) {
+        next->addFallback(host.dataReader(), fallback_italic.c_str(), FontStyle::Italic);
+    }
+
+    font_ = std::move(next);
     valid_ = true;
     return true;
+}
+
+bool TextPainter::reload(Host& host, const FontPreset& preset, std::string& error) {
+    return open_faces(host, preset, error);
 }
 
 bool TextPainter::collect(std::string_view text) {
@@ -93,6 +122,14 @@ float TextPainter::width(std::string_view text, float size, FontStyle style) con
         previous = cp;
     }
     return pen;
+}
+
+float TextPainter::line_height(float size) const {
+    const float css_box = size * 1.35f;
+    if (valid_ && font_ != nullptr) {
+        return std::max(css_box, font_->lineHeight(size));
+    }
+    return css_box;
 }
 
 float TextPainter::ascender(float size) const {

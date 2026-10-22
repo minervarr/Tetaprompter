@@ -1,12 +1,14 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <set>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "canvas.hh"
+#include "fonts.hh"
 #include "text_font.hh"
 #include "teleprompter/colour.hh"
 
@@ -41,7 +43,8 @@ struct ClipRect {
 class TextPainter {
 public:
     ~TextPainter();
-    bool load(Host& host, std::string& error);
+    bool load(Host& host, const FontPreset& preset, std::string& error);
+    bool reload(Host& host, const FontPreset& preset, std::string& error);
     bool valid() const { return valid_; }
 
     // Add every codepoint in `text` to the bake set. Returns true if new ones
@@ -54,9 +57,9 @@ public:
     int bake_misses();
 
     float width(std::string_view text, float size, FontStyle style = FontStyle::Roman) const;
-    float line_height(float size) const { return size * 1.35f; }
+    float line_height(float size) const;
     float ascender(float size) const;
-    const RasterFont* font() const { return font_; }
+    const RasterFont* font() const { return font_.get(); }
 
     std::vector<Glyph> layout(std::string_view text, float pen_x, float baseline_y,
                               float size, FontStyle style = FontStyle::Roman) const;
@@ -73,7 +76,8 @@ public:
                      ::Color colour) const;
 
 private:
-    RasterFont* font_ = nullptr;
+    bool open_faces(Host& host, const FontPreset& preset, std::string& error);
+    std::unique_ptr<RasterFont> font_;
     bool valid_ = false;
     std::set<uint32_t> codepoints_;
     std::set<int> sizes_;

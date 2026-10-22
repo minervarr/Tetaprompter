@@ -45,8 +45,9 @@ test score are copied beside it automatically. Run it from anywhere:
 ## Command line
 
 ```
-teleprompter [script] [--line PCT] [--output CONNECTOR] [--device DEV]
-             [--audio SRC] [--size WIDTHxHEIGHT] [--fps N] [--windowed]
+teleprompter [script] [--line PCT] [--output CONNECTOR] [--font FACE]
+             [--device DEV] [--audio SRC] [--size WIDTHxHEIGHT] [--fps N]
+             [--windowed]
 teleprompter --print-timing [--words] [script]
 teleprompter --check
 ```
@@ -61,6 +62,11 @@ teleprompter --check
   `DP-2`, the local portrait monitor). If the connector is absent the
   compositor chooses. A purely windowed surface cannot be positioned by a
   Wayland client, so use fullscreen/`--output` when the monitor matters.
+- `--font` chooses `newcm` (the default New Computer Modern Sans), `opendyslexic`,
+  or a path to an `.otf`/`.ttf` file or a directory of faces. Changes made from
+  the in-app font menu are remembered in
+  `$XDG_STATE_HOME/teleprompter/settings.json`; `--font` itself is a one-run
+  override.
 
 There is intentionally **no `--duration`**: the total is the sum of the
 authored word times.
@@ -76,6 +82,7 @@ These exist for automated verification and are not part of the user contract:
 --record-test N     record N seconds, finalize, exit
 --demo-help         open the key map on the first frame
 --demo-picker       open the built-in file picker on the first frame
+--demo-font         open the font menu on the first frame
 ```
 
 ## The score
@@ -112,12 +119,32 @@ The short form:
 | A | Centred / flush-left text |
 | K | Word-by-word karaoke fill |
 | M | Mood colours |
+| T | Choose the script font |
 | Left / Right | Nudge the scroll position |
 | Home / End | Jump to the top / bottom |
 | F5 or L | Reload the current script |
 | H | Show / hide the HUD and section timer |
 | ? or F1 | Show the key map |
 | Ctrl+Q | Quit, finalizing any recording first |
+
+## Fonts and text quality
+
+OpenDyslexic is available next to New Computer Modern. Press **T** — or click
+the **Font: …** button in the library — to choose. The script, HUD, library and
+help card use the selected face; stage directions stay in the smaller
+monospace face so they remain visually distinct. OpenDyslexic is wider, so its
+preset uses a 0.70 size factor to keep a comparable amount of text per line.
+It also lacks em dash, ellipsis and arrow glyphs; those fall back to New
+Computer Modern per style instead of disappearing.
+
+![OpenDyslexic](docs/screenshot-opendyslexic.png)
+
+The text engine path is **RasterFont**, not MTSDF: it rasterizes the actual
+Bézier outlines with FreeType at the exact pixel size (8-bit coverage, with
+subpixel phases for small text). That is the highest-quality path for this
+fixed-size UI and is what the app already uses. MTSDF is a different trade-off
+for continuously scaled text; it would be softer at the 11–16 px HUD sizes, so
+it is not the default.
 
 ## What is in here
 
@@ -127,7 +154,7 @@ gui/                      Vulkan/Wayland window, text layout, karaoke renderer
 tests/                    stdlib-style assert tests for the pure core
 libs/firstparty/framework/App_shell              submodule
 libs/firstparty/framework/Vk_Canvas_Lb_LAW       submodule
-assets/fonts/             shipped UI/mono faces
+assets/fonts/             New Computer Modern, OpenDyslexic and mono faces
 samples/test-script.txt   built-in, read-only demo score
 prototype/                the original Python app, samples, tests and docs
 docs/                     screenshot, porting notes and roadmap

@@ -10,6 +10,7 @@ struct RuntimeOptions {
     std::string audio = "default";
     std::string size = "1280x720";
     std::string output = "DP-2"; // Wayland connector for fullscreen
+    std::string font;           // newcm | opendyslexic | path; empty = settings/default
     int fps = 30;
     int line_percent = 25;
     bool windowed = false;
@@ -20,6 +21,7 @@ struct RuntimeOptions {
     double seek_seconds = -1.0; // dev: start the read at this clock
     bool demo_help = false;
     bool demo_picker = false;
+    bool demo_font = false;
     bool autoplay = false;
     double record_test_seconds = -1.0; // dev: record for this long, then exit
 };

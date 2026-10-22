@@ -1,7 +1,8 @@
 add_library(teleprompter_core STATIC
     src/script.cc
     src/recents.cc
-    src/recorder.cc)
+    src/recorder.cc
+    src/settings.cc)
 
 target_include_directories(teleprompter_core PUBLIC include)
 target_compile_features(teleprompter_core PUBLIC cxx_std_17)

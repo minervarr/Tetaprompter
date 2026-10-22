@@ -83,6 +83,8 @@ private:
     void load_picker();
     void picker_activate(int index);
     void picker_up();
+    void open_font_menu();
+    void apply_font(const gui::FontPreset& preset, bool persist, bool announce = true);
 
     void open_script(const std::string& path, bool remember = true);
     void open_test_script();
@@ -115,6 +117,7 @@ private:
     void draw_hud(Canvas& canvas);
     void draw_section(Canvas& canvas);
     void draw_help(Canvas& canvas);
+    void draw_font_menu(Canvas& canvas);
     void draw_picker(Canvas& canvas);
     void draw_cue_bars(Canvas& canvas);
     void draw_progress(Canvas& canvas);
@@ -176,12 +179,17 @@ private:
     float cue_fraction_ = 0.25f;
     float font_px_ = 56.0f;
     float script_px_ = 56.0f;
+    float effective_script_px() const { return script_px_ * current_font_.size_scale; }
     bool centered_ = true;
     bool karaoke_ = true;
     bool mood_on_ = true;
     bool hud_visible_ = true;
     bool hud_dimmed_ = false;
     bool help_visible_ = false;
+    bool font_menu_open_ = false;
+    int font_menu_selected_ = 0;
+    gui::FontPreset current_font_;
+    std::string startup_font_error_;
     bool fullscreen_ = false;
     bool ctrl_down_ = false;
     bool shift_down_ = false;

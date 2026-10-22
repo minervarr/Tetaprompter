@@ -12,7 +12,8 @@ namespace {
 
 void usage() {
     std::fputs(
-        "usage: teleprompter [script] [--line PCT] [--output CONNECTOR] [--windowed]\n"
+        "usage: teleprompter [script] [--line PCT] [--output CONNECTOR]\n"
+        "                   [--font newcm|opendyslexic|PATH] [--windowed]\n"
         "       teleprompter --print-timing [--words] [script]\n"
         "       teleprompter --check\n",
         stderr);
@@ -80,6 +81,10 @@ int app_shell_main(int argc, char **argv) {
             options.demo_picker = true;
             continue;
         }
+        if (std::strcmp(arg, "--demo-font") == 0) {
+            options.demo_font = true;
+            continue;
+        }
         if (std::strcmp(arg, "--capture") == 0) {
             if (i + 1 >= argc) {
                 std::fprintf(stderr, "error: --capture needs a path\n");
@@ -94,6 +99,14 @@ int app_shell_main(int argc, char **argv) {
                 return 2;
             }
             options.line_percent = std::atoi(argv[++i]);
+            continue;
+        }
+        if (std::strcmp(arg, "--font") == 0) {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "error: --font needs a name or path\n");
+                return 2;
+            }
+            options.font = argv[++i];
             continue;
         }
         if (std::strcmp(arg, "--output") == 0) {

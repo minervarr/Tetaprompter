@@ -27,9 +27,10 @@ preserved read-only in `prototype/` as the behavioural reference.
 - The script text must never end up in the recording. ffmpeg captures the
   camera device directly; the UI is not part of that stream.
 - No camera preview in the UI. The camera opens only while recording.
-- No user-facing config files. The disposable recent-script cache at
-  `$XDG_STATE_HOME/teleprompter/recents.json` is best-effort; losing it must
-  never prevent a script from opening.
+- No user-facing config files except disposable state. The recents cache at
+  `$XDG_STATE_HOME/teleprompter/recents.json` and the one-line font preference
+  at `$XDG_STATE_HOME/teleprompter/settings.json` are best-effort; losing either
+  must never prevent a script from opening.
 - Do not add a `--duration`, anchors or an estimated fallback. The score's
   summed word/comment times are the only total.
 
@@ -44,7 +45,8 @@ gui/src/layout.{hh,cc}       word wrapping + per-glyph placement
 gui/src/text.{hh,cc}         RasterFont loader + text-quad emitter
 tests/core_tests.cc          pure-logic checks (no display)
 samples/test-script.txt      shipped demo score
-assets/fonts/                shipped UI/mono OTF faces
+assets/fonts/                New Computer Modern, OpenDyslexic and mono faces
+assets/fonts/openDix/OFL.txt OpenDyslexic SIL OFL 1.1
 prototype/                   Python/GTK reference implementation
 docs/                        screenshot, PORTING.md, ROADMAP.md
 scripts/                     build.sh, run.sh, verify.sh
@@ -67,12 +69,14 @@ cmake --build build
 For a non-interactive rendering check:
 
 ```sh
-./build/gui/teleprompter --windowed --seek 8 \
+./build/gui/teleprompter --seek 8 \
   --capture /tmp/tp.ppm samples/test-script.txt
 ffmpeg -y -loglevel error -i /tmp/tp.ppm /tmp/tp.png
 ```
 
-`--capture` writes a PPM after ~30 frames. The test script's total is `0:23`.
+`--capture` writes a PPM after 6 frames. It is fullscreen on the requested
+output (default `DP-2`) and exits, so it does not leave a window behind. The
+test script's total is `0:23`.
 
 ## Behaviour contract
 
@@ -91,6 +95,7 @@ Keyboard is captured by the app's `onKeyDownPortable` (App_shell forwards it):
 | A | Centred / flush left |
 | K | Karaoke fill |
 | M | Mood colours |
+| T | Choose the script font (library button too) |
 | Left / Right | Nudge scroll |
 | Home / End | Top / bottom |
 | F5 or L | Reload |
@@ -109,6 +114,14 @@ Keyboard is captured by the app's `onKeyDownPortable` (App_shell forwards it):
 - Recents store absolute paths + unix timestamps in
   `$XDG_STATE_HOME/teleprompter/recents.json`, dedupe by resolved path, cap at
   30, and write atomically. The test script is never recorded in recents.
+- Fonts: two presets, `newcm` and `opendyslexic`, plus arbitrary `--font
+  PATH`. The script, HUD, library and help use the chosen face; stage
+  directions stay monospace. OpenDyslexic uses a 0.70 size factor and falls
+  back to New Computer Modern per style for the em dash, ellipsis and arrows
+  it lacks. The chosen font is remembered in `settings.json` only when selected
+  from the menu; `--font` is a one-run override. The renderer stays on
+  RasterFont, which rasterizes actual Bézier outlines at the exact pixel size —
+  the highest-quality fixed-size path. MTSDF is not the default.
 - Word prefixes: `[seconds]` before a word/comment; `{mood}` / `{mood: Theme}`
   / `{#rrggbb}` persist; a tag-only paragraph is a header. Every displayed
   token needs a positive time. `[1.5] [look]` is a timed comment; `[2.0]` alone
@@ -139,10 +152,12 @@ Keyboard is captured by the app's `onKeyDownPortable` (App_shell forwards it):
 
 - `core` has no Vulkan/Wayland includes. `gui` owns the `AppView`, `Renderer`,
   `TextPainter` and `ScriptLayout`.
-- `TextPainter` loads `assets/fonts/ui/NewCMSans10-*.otf` + mono via
-  `RasterFont::open/addStyle`, bakes every collected codepoint at every used
-  size, and emits glyph quads itself so per-character karaoke colours are
-  possible. It does **not** use `Canvas::text` for script text.
+- `TextPainter` loads a `FontPreset` (`newcm` or `opendyslexic`) via
+  `RasterFont::open/addStyle`, registers New Computer Modern fallbacks for
+  missing codepoints, bakes every collected codepoint at every used size, and
+  emits glyph quads itself so per-character karaoke colours are possible. It
+  does **not** use `Canvas::text` for script text. `TextPainter::reload()` is
+  the runtime switch; the atlas is re-uploaded through `Renderer::initMsdf()`.
 - `layout.cc` wraps on measured word widths, records every glyph's line centre,
   and builds `ScriptLayout::word_center`. Several words on one line produce
   repeated timeline positions; that is how a line dwells.
@@ -160,9 +175,10 @@ Keyboard is captured by the app's `onKeyDownPortable` (App_shell forwards it):
   exposes `app_shell_restore_console()` for CLI output when stdout is a pipe.
 - The built-in file picker is immediate-mode: directories then `*.txt`, `*.md`,
   `*.text`; Enter opens, Backspace goes up, Esc cancels.
-- The font size is 5.5 % of monitor height, clamped 28–120 px. `LINE_HEIGHT`
-  is 1.35× the font; paragraph gap is also 1.35×. Column width is at most 66 %
-  of the viewport and centred.
+- The base font size is 5.5 % of monitor height, clamped 28–120 px. Per-preset
+  `size_scale` is applied to it (OpenDyslexic uses 0.70); line height is
+  `max(1.35×size, font.lineHeight(size))`, and paragraph gap follows the same
+  metric. Column width is at most 66 % of the viewport and centred.
 
 ## If touching the framework submodules
 
