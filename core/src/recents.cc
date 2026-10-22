@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <set>
 #include <sstream>
 
@@ -296,6 +297,8 @@ bool save_recents(const std::vector<Recent>& entries, const std::string& path) {
 
     std::ostringstream payload;
     payload << "{\n  \"version\": 1,\n  \"scripts\": [\n";
+    // Epoch seconds need more than the default six significant digits.
+    payload << std::setprecision(17);
     const std::size_t count = std::min(entries.size(), static_cast<std::size_t>(kRecentsMax));
     for (std::size_t i = 0; i < count; ++i) {
         payload << "    {\"path\": \"" << json_escape(entries[i].path)
@@ -331,6 +334,7 @@ std::vector<Recent> remember_recent(std::vector<Recent> entries,
     const std::string key = path_key(script_path);
     if (now < 0.0) now = now_seconds();
     std::vector<Recent> fresh;
+    fresh.reserve(entries.size() + 1);
     fresh.push_back(Recent{key, now});
     for (const Recent& entry : entries) {
         if (entry.path != key) fresh.push_back(entry);
@@ -343,6 +347,7 @@ std::vector<Recent> remember_recent(std::vector<Recent> entries,
 
 std::vector<Recent> prune_missing(std::vector<Recent> entries) {
     std::vector<Recent> out;
+    out.reserve(entries.size());
     std::set<std::string> seen;
     for (const Recent& entry : entries) {
         std::error_code ec;

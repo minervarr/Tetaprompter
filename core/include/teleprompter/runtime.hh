@@ -9,7 +9,8 @@ struct RuntimeOptions {
     std::string device = "/dev/video0";
     std::string audio = "default";
     std::string size = "1280x720";
-    std::string output = "DP-2"; // Wayland connector for fullscreen
+    // Wayland connector for fullscreen. Empty lets the compositor choose.
+    std::string output;
     std::string font;           // newcm | opendyslexic | path; empty = settings/default
     int fps = 30;
     int line_percent = 25;

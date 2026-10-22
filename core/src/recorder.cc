@@ -5,10 +5,8 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
-#include <cstring>
 #include <ctime>
 #include <filesystem>
-#include <fstream>
 #include <regex>
 #include <sstream>
 #include <thread>
@@ -259,6 +257,9 @@ bool Recorder::start(std::string& error) {
         error = "a recording is already running";
         return false;
     }
+    // Drain the previous take before clearing the log, otherwise a late line
+    // can be attributed to the new recording.
+    join_stderr();
     std::error_code ec;
     fs::create_directories(options_.out_dir, ec);
     if (ec) {
@@ -320,7 +321,6 @@ bool Recorder::start(std::string& error) {
         std::lock_guard<std::mutex> lock(log_mu_);
         log_.clear();
     }
-    if (stderr_thread_.joinable()) stderr_thread_.join();
     stderr_thread_ = std::thread(&Recorder::drain_stderr, this, errpipe[0]);
     return true;
 }
@@ -328,22 +328,18 @@ bool Recorder::start(std::string& error) {
 std::optional<int> Recorder::poll() {
     if (pid_ < 0 || stopping_.load()) return std::nullopt;
     int status = 0;
-    const pid_t result = ::waitpid(pid_, &status, WNOHANG);
+    pid_t result = 0;
+    do {
+        result = ::waitpid(pid_, &status, WNOHANG);
+    } while (result < 0 && errno == EINTR);
     if (result == 0) return std::nullopt;
-    if (result < 0) {
-        if (errno == EINTR) return std::nullopt;
-        pid_ = -1;
-        if (stdin_fd_ >= 0) {
-            ::close(stdin_fd_);
-            stdin_fd_ = -1;
-        }
-        return -1;
-    }
     if (stdin_fd_ >= 0) {
         ::close(stdin_fd_);
         stdin_fd_ = -1;
     }
     pid_ = -1;
+    join_stderr();
+    if (result < 0) return -1;
     return status_code(status);
 }
 
@@ -352,12 +348,13 @@ void Recorder::stop_async() {
     stopping_ = true;
     finished_ = false;
     if (stop_thread_.joinable()) stop_thread_.join();
-    stop_thread_ = std::thread(&Recorder::stop_worker, this);
+    stop_thread_ = std::thread(&Recorder::stop_worker, this, pid_, stdin_fd_);
 }
 
 bool Recorder::take_finished(int& code) {
     if (!finished_.load()) return false;
     if (stop_thread_.joinable()) stop_thread_.join();
+    join_stderr();
     code = finish_code_.load();
     finished_ = false;
     pid_ = -1;
@@ -367,9 +364,19 @@ bool Recorder::take_finished(int& code) {
 }
 
 void Recorder::stop_blocking() {
+    // If an async stop already owns the process, let it finish rather than
+    // racing a second waitpid() against it.
+    if (stop_thread_.joinable()) {
+        stop_thread_.join();
+        pid_ = -1;
+        stdin_fd_ = -1;
+        stopping_ = false;
+        finished_ = true;
+        join_stderr();
+        return;
+    }
     if (pid_ < 0) {
-        if (stop_thread_.joinable()) stop_thread_.join();
-        if (stderr_thread_.joinable()) stderr_thread_.join();
+        join_stderr();
         return;
     }
     const int pid = pid_;
@@ -380,6 +387,7 @@ void Recorder::stop_blocking() {
     finish_code_ = shutdown_process(pid, fd);
     stopping_ = false;
     finished_ = true;
+    join_stderr();
 }
 
 int Recorder::pid() const {
@@ -403,10 +411,11 @@ void Recorder::drain_stderr(int fd) {
         const ssize_t n = ::read(fd, buffer, sizeof(buffer));
         if (n > 0) {
             pending.append(buffer, static_cast<std::size_t>(n));
+            std::size_t consumed = 0;
             std::size_t newline = 0;
-            while ((newline = pending.find('\n')) != std::string::npos) {
-                std::string line = pending.substr(0, newline);
-                pending.erase(0, newline + 1);
+            while ((newline = pending.find('\n', consumed)) != std::string::npos) {
+                std::string line = pending.substr(consumed, newline - consumed);
+                consumed = newline + 1;
                 while (!line.empty() &&
                        std::isspace(static_cast<unsigned char>(line.back()))) {
                     line.pop_back();
@@ -414,8 +423,9 @@ void Recorder::drain_stderr(int fd) {
                 if (line.empty()) continue;
                 std::lock_guard<std::mutex> lock(log_mu_);
                 log_.push_back(std::move(line));
-                while (log_.size() > 200) log_.pop_front();
+                if (log_.size() > 200) log_.pop_front();
             }
+            if (consumed != 0) pending.erase(0, consumed);
             continue;
         }
         if (n == 0) break;
@@ -425,18 +435,20 @@ void Recorder::drain_stderr(int fd) {
     if (!pending.empty()) {
         std::lock_guard<std::mutex> lock(log_mu_);
         log_.push_back(std::move(pending));
-        while (log_.size() > 200) log_.pop_front();
+        if (log_.size() > 200) log_.pop_front();
     }
     ::close(fd);
 }
 
-void Recorder::stop_worker() {
-    const int pid = pid_;
-    const int fd = stdin_fd_;
-    const int code = shutdown_process(pid, fd);
+void Recorder::stop_worker(int pid, int stdin_fd) {
+    const int code = shutdown_process(pid, stdin_fd);
     finish_code_ = code;
     stopping_ = false;
     finished_ = true;
+}
+
+void Recorder::join_stderr() {
+    if (stderr_thread_.joinable()) stderr_thread_.join();
 }
 
 int Recorder::shutdown_process(int pid, int stdin_fd) {

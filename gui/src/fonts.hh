@@ -16,8 +16,6 @@ struct FontPreset {
     std::string regular;
     std::string bold;
     std::string italic;
-    std::string bold_italic;
-    std::string mono;
     std::string fallback_regular;
     std::string fallback_bold;
     std::string fallback_italic;

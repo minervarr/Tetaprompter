@@ -49,7 +49,9 @@ assets/fonts/                New Computer Modern, OpenDyslexic and mono faces
 assets/fonts/openDix/OFL.txt OpenDyslexic SIL OFL 1.1
 prototype/                   Python/GTK reference implementation
 docs/                        screenshot, PORTING.md, ROADMAP.md
-scripts/                     build.sh, run.sh, verify.sh
+manifest.json                version + build entry point (CMake and scripts/)
+cmake/TestHelpers.cmake      teleprompter_add_test(), Debug-only
+scripts/                     build.sh, run.sh, verify.sh, builder sources/zipapp
 patches/                     notes/patches for framework changes
 ```
 
@@ -57,13 +59,34 @@ patches/                     notes/patches for framework changes
 
 ```sh
 git submodule update --init --recursive
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-./build/tests/teleprompter_core_tests
+./scripts/build.sh                  # Debug into build/ (tests included)
+./scripts/verify.sh
 ./build/gui/teleprompter --print-timing samples/test-script.txt
 ./build/gui/teleprompter --print-timing --words samples/test-script.txt
 ./build/gui/teleprompter --check            # camera + mic, 1 s each
 ./build/gui/teleprompter --windowed         # interactive check
+```
+
+`scripts/build.sh` drives the stdlib-only Python zipapp
+(`scripts/teleprompter_builder.pyz`, sources in `scripts/src/`):
+
+```sh
+./scripts/build.sh build --release   # Release into build_release/ (no tests)
+./scripts/build.sh build --no-gui    # portable core + tests only
+./scripts/build.sh build --dry-run
+./scripts/test_builder.sh
+```
+
+The builder probes for `slangc`/`$VULKAN_SDK`, the Wayland/xkb pkg-config
+modules and `wayland-scanner`; it enables `TP_BUILD_GUI` when they are present
+and falls back to a core-only build when they are not. `--gui`/`--no-gui`
+override. Tests are Debug-only: `teleprompter_add_test()` produces no target in
+Release. The direct cmake recipe is equivalent:
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
 For a non-interactive rendering check:
@@ -74,9 +97,9 @@ For a non-interactive rendering check:
 ffmpeg -y -loglevel error -i /tmp/tp.ppm /tmp/tp.png
 ```
 
-`--capture` writes a PPM after 6 frames. It is fullscreen on the requested
-output (default `DP-2`) and exits, so it does not leave a window behind. The
-test script's total is `0:23`.
+`--capture` writes a PPM after 6 frames. It is fullscreen on the compositor's
+current output unless `--output` pins one, and exits, so it does not leave a
+window behind. The test script's total is `0:23`.
 
 ## Behaviour contract
 
@@ -105,9 +128,9 @@ Keyboard is captured by the app's `onKeyDownPortable` (App_shell forwards it):
 
 - Startup without a path is the **library** (recents newest first, missing
   files pruned, always-available **Test script**, built-in **Open script**
-  picker). The initial window is fullscreen on the requested Wayland output
-  (default `DP-2`) so an automated run cannot land on another monitor's focused
-  workspace; `--windowed` restores a windowed start. Invalid cards say
+  picker). The initial window is fullscreen on the compositor's current output
+  unless `--output CONNECTOR` pins one; `--windowed` restores a windowed start.
+  Invalid cards say
   `needs timing` and do not switch pages.
 - Opening a valid script switches to the fullscreen prompter unless
   `--windowed`. Ctrl+R pauses, leaves fullscreen and refreshes the library.
@@ -115,13 +138,14 @@ Keyboard is captured by the app's `onKeyDownPortable` (App_shell forwards it):
   `$XDG_STATE_HOME/teleprompter/recents.json`, dedupe by resolved path, cap at
   30, and write atomically. The test script is never recorded in recents.
 - Fonts: two presets, `newcm` and `opendyslexic`, plus arbitrary `--font
-  PATH`. The script, HUD, library and help use the chosen face; stage
-  directions stay monospace. OpenDyslexic uses a 0.70 size factor and falls
-  back to New Computer Modern per style for the em dash, ellipsis and arrows
-  it lacks. The chosen font is remembered in `settings.json` only when selected
-  from the menu; `--font` is a one-run override. The renderer stays on
-  RasterFont, which rasterizes actual Bézier outlines at the exact pixel size —
-  the highest-quality fixed-size path. MTSDF is not the default.
+  PATH`. All text uses the chosen face, including stage directions and
+  comments. OpenDyslexic uses a 0.70 size factor and falls back to New Computer
+  Modern per style for the em dash, ellipsis and arrows it lacks. The chosen
+  font is remembered in
+  `settings.json` whether selected from the menu or supplied with `--font`.
+  The renderer stays on RasterFont, which rasterizes actual Bézier outlines at
+  the exact pixel size — the highest-quality fixed-size path. MTSDF is not the
+  default.
 - Word prefixes: `[seconds]` before a word/comment; `{mood}` / `{mood: Theme}`
   / `{#rrggbb}` persist; a tag-only paragraph is a header. Every displayed
   token needs a positive time. `[1.5] [look]` is a timed comment; `[2.0]` alone
@@ -132,8 +156,8 @@ Keyboard is captured by the app's `onKeyDownPortable` (App_shell forwards it):
 - Karaoke: spoken words start at `KARAOKE_GRAY`; the active word fills
   left-to-right per character over its authored seconds; finished words stay
   lit. Comments are always amber, italic, and brighten uniformly; inline
-  comments get a dark chip, standalone comments a monospace card with an amber
-  left rule. `K` disables the fill; `M` disables spoken mood tint only.
+  comments get a dark chip, standalone comments a card with an amber left rule.
+  `K` disables the fill; `M` disables spoken mood tint only.
 - The reading line is two amber side bars + a `- 25%` HUD badge. The first line
   starts on it; the last line lands on it at full weight. `--line` sets the
   starting fraction (clamped 5–60 %).
@@ -152,6 +176,10 @@ Keyboard is captured by the app's `onKeyDownPortable` (App_shell forwards it):
 
 - `core` has no Vulkan/Wayland includes. `gui` owns the `AppView`, `Renderer`,
   `TextPainter` and `ScriptLayout`.
+- The build front end is a stdlib-only Python zipapp
+  (`scripts/src/teleprompter_build`, regenerated to
+  `scripts/teleprompter_builder.pyz`); it only drives cmake + ninja.
+  `manifest.json` is the version source for both the builder and CMake.
 - `TextPainter` loads a `FontPreset` (`newcm` or `opendyslexic`) via
   `RasterFont::open/addStyle`, registers New Computer Modern fallbacks for
   missing codepoints, bakes every collected codepoint at every used size, and

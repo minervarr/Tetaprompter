@@ -1,0 +1,10 @@
+{
+  "name": "teleprompter",
+  "description": "Single-user Linux teleprompter: a Vulkan/Wayland score while ffmpeg records the camera and microphone.",
+  "version": "0.1.0",
+  "platforms": ["linux"],
+  "language": "C++17",
+  "build": {
+    "linux": "scripts/build.sh"
+  }
+}

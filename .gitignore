@@ -1,5 +1,6 @@
 build/
 build-*/
+build_*/
 *.pyz
 __pycache__/
 *.pyc

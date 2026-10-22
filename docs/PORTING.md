@@ -38,8 +38,8 @@ rendering/input stack.
 - **Fonts are explicit presets.** New Computer Modern Sans is the default;
   OpenDyslexic is a second preset with a 0.70 size factor and New Computer
   Modern fallbacks for the em dash, ellipsis and arrows it lacks. The selected
-  face applies to script, HUD, library and help; stage directions remain in the
-  mono face. `T`/the library button/`--font` choose it.
+  face applies to every screen, including stage directions and comments.
+  `T`/the library button/`--font` choose it, and the choice is remembered.
 - **Text quality stays on RasterFont.** It rasterizes the actual Bézier outlines
   per size (8-bit coverage, subpixel phases), which is the highest-quality path
   for this fixed-size UI. MTSDF is not used because it would be softer at HUD
@@ -52,14 +52,12 @@ rendering/input stack.
   directions and is the only intentional visual difference in the script area.
 - **Recording lives beside the executable**, matching the `.pyz` rule, not
   beside the Python source tree.
-- **Fullscreen picks a Wayland output.** The default is the connector `DP-2`
-  on the target laptop (portrait), with `--output` to override. This keeps
-  automated captures and the app off a monitor used for other work. A windowed
-  Wayland surface cannot be positioned by the client, so `--windowed` leaves
-  placement to the compositor.
-- **The initial library is fullscreen by default** (on the selected output), so
-  a launch cannot land on the focused workspace of the other monitor;
-  `--windowed` restores the old windowed start.
+- **Fullscreen follows the compositor's current output by default.** Pass
+  `--output CONNECTOR` to pin a specific monitor (`DP-2`, `HDMI-A-1`, …). A
+  windowed Wayland surface cannot be positioned by the client, so `--windowed`
+  leaves placement to the compositor.
+- **The initial library is fullscreen by default** on the compositor's current
+  output; `--output` pins a monitor and `--windowed` restores a windowed start.
 - **Log file** lives at `$HOME/.local/state/teleprompter/teleprompter.log`, the
   same state directory as recents. CLI modes (`--print-timing`, `--check`,
   `--help`) restore the original stdout/stderr so scripts and pipes see output.

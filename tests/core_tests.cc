@@ -4,9 +4,11 @@
 #include "teleprompter/recorder.hh"
 #include "teleprompter/settings.hh"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cmath>
 #include <cstdio>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -172,6 +174,54 @@ static void formatting() {
     CHECK(near(character_fill(0.375, 0, 4), 1.0));
     CHECK(near(character_fill(0.375, 1, 4), 0.5));
     CHECK(near(character_fill(0.375, 2, 4), 0.0));
+    CHECK(format_age(0.0, 1000.0) == "unknown");
+    CHECK(format_age(-1.0, 1000.0) == "unknown");
+}
+
+static void colour_and_truncation() {
+    const Rgb fallback{1, 2, 3};
+    CHECK(hex_from_rgb(parse_hex("#zzzzzz", fallback)) == "#010203");
+    CHECK(hex_from_rgb(parse_hex("#F0a03C")) == "#f0a03c");
+    CHECK(hex_from_rgb(mood_colour("WARM")) == "#f5dcc0");
+    CHECK(hex_from_rgb(mood_colour("#102030")) == "#102030");
+    CHECK(hex_from_rgb(mood_colour("not-a-mood")) == "#f2f2f2");
+
+    CHECK(preview_text("abcdef", 4) == "abc…");
+    CHECK(preview_text("αβγδε", 4) == "αβγ…");
+    CHECK(preview_text("αβ", 4) == "αβ");
+    CHECK(preview_text("abc", 0) == "…");
+
+    Paragraph paragraph;
+    paragraph.text = "[αβγδε]";
+    CHECK(section_title(paragraph, 3) == "αβ…");
+    CHECK(section_title(paragraph, 20) == "αβγδε");
+}
+
+static void oversized_duration_is_clamped() {
+    const std::string huge = "[" + std::string(400, '9') + "]Hello.";
+    const auto plan = paragraph_plan(huge);
+    CHECK(plan.size() == 1);
+    CHECK(near(plan[0].words[0].seconds, kWordMaxSeconds));
+}
+
+static void recorder_helpers() {
+    RecorderOptions options;
+    const auto command = build_ffmpeg_cmd("/tmp/out.mp4", options);
+    CHECK(!command.empty() && command.front() == "ffmpeg");
+    CHECK(std::find(command.begin(), command.end(), "1280x720") != command.end());
+    CHECK(std::find(command.begin(), command.end(), "/dev/video0") != command.end());
+    CHECK(command.back() == "/tmp/out.mp4");
+
+    int width = 0;
+    int height = 0;
+    std::string error;
+    CHECK(parse_capture_size("1280x720", width, height, error));
+    CHECK(width == 1280 && height == 720);
+    CHECK(!parse_capture_size("1281x720", width, height, error));
+    CHECK(!parse_capture_size("1280X720", width, height, error));
+
+    CHECK(pick_error_line("[in#0 @ 0x1] Permission denied\n") == "Permission denied");
+    CHECK(pick_error_line(" \n\t\n").empty());
 }
 
 static void settings_round_trip() {
@@ -199,14 +249,17 @@ static void recents_round_trip() {
     { std::ofstream(one) << "[0.5]One."; }
     { std::ofstream(two) << "[0.5]Two."; }
     const std::string cache = dir + "/recents.json";
+    const double now = static_cast<double>(std::time(nullptr)) + 0.125;
     std::vector<Recent> entries;
-    entries = remember_recent(entries, one, 100.0);
-    entries = remember_recent(entries, two, 200.0);
+    entries = remember_recent(entries, one, now - 100.0);
+    entries = remember_recent(entries, two, now);
     CHECK(save_recents(entries, cache));
     const auto loaded = load_recents(cache);
     CHECK(loaded.size() == 2);
     CHECK(loaded[0].path == resolve_path(two));
     CHECK(loaded[1].path == resolve_path(one));
+    CHECK(near(loaded[0].opened, now, 1e-6));
+    CHECK(near(loaded[1].opened, now - 100.0, 1e-6));
     CHECK(read_script_time(one).has_value());
     CHECK(!read_script_time(dir + "/missing.txt").has_value());
 }
@@ -219,6 +272,9 @@ int main() {
     utf8_offsets();
     timeline_math();
     formatting();
+    colour_and_truncation();
+    oversized_duration_is_clamped();
+    recorder_helpers();
     sample_score();
     settings_round_trip();
     recents_round_trip();

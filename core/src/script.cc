@@ -50,6 +50,24 @@ std::string lower_ascii(std::string value) {
     return value;
 }
 
+bool ascii_iequals(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) return false;
+    for (std::size_t i = 0; i < a.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(a[i])) !=
+            std::tolower(static_cast<unsigned char>(b[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int hex_nibble(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
 bool is_hex_colour(std::string_view value) {
     if (value.size() != 7 || value[0] != '#') {
         return false;
@@ -110,15 +128,40 @@ int utf8_count(std::string_view value) {
     return count;
 }
 
+// Byte offset just past `max_codepoints` codepoints. Used for truncation so a
+// UTF-8 sequence is never sliced in half.
+std::size_t utf8_prefix_bytes(std::string_view value, std::size_t max_codepoints) {
+    std::size_t i = 0;
+    std::size_t count = 0;
+    while (i < value.size() && count < max_codepoints) {
+        ++i;
+        while (i < value.size() &&
+               (static_cast<unsigned char>(value[i]) & 0xC0) == 0x80) {
+            ++i;
+        }
+        ++count;
+    }
+    return i;
+}
 
-std::regex duration_regex() {
+const std::regex& duration_regex() {
     static const std::regex re(R"(^\[(\d+(?:\.\d+)?)\]$)");
     return re;
 }
 
-std::regex legacy_anchor_regex() {
+const std::regex& legacy_anchor_regex() {
     static const std::regex re(R"(^\[(\d{1,3}(?::\d{1,2}){1,2}(?:\.\d+)?)\]$)");
     return re;
+}
+
+double parse_duration_value(const std::string& value) {
+    try {
+        return std::max(0.0, std::min(kWordMaxSeconds, std::stod(value)));
+    } catch (const std::out_of_range&) {
+        return kWordMaxSeconds;
+    } catch (...) {
+        return 0.0;
+    }
 }
 
 
@@ -157,18 +200,20 @@ std::string escape_markup(std::string_view text) {
 } // namespace
 
 // ── Colour helpers ──────────────────────────────────────────────────────────
-Rgb parse_hex(std::string_view hex, Rgb fallback) {
+Rgb parse_hex(std::string_view hex, Rgb fallback) noexcept {
     if (hex.size() != 7 || hex[0] != '#') {
         return fallback;
     }
-    auto byte = [&](std::size_t at) {
-        return static_cast<int>(std::stoi(std::string(hex.substr(at, 2)), nullptr, 16));
-    };
-    try {
-        return Rgb{byte(1), byte(3), byte(5)};
-    } catch (...) {
+    const int r0 = hex_nibble(hex[1]);
+    const int r1 = hex_nibble(hex[2]);
+    const int g0 = hex_nibble(hex[3]);
+    const int g1 = hex_nibble(hex[4]);
+    const int b0 = hex_nibble(hex[5]);
+    const int b1 = hex_nibble(hex[6]);
+    if (r0 < 0 || r1 < 0 || g0 < 0 || g1 < 0 || b0 < 0 || b1 < 0) {
         return fallback;
     }
+    return Rgb{(r0 << 4) | r1, (g0 << 4) | g1, (b0 << 4) | b1};
 }
 
 std::string hex_from_rgb(Rgb c) {
@@ -196,18 +241,24 @@ Rgb scale(Rgb c, double factor) {
 }
 
 Rgb mood_colour(std::string_view name) {
-    const std::string lowered = lower_ascii(std::string(name));
-    if (lowered == "somber") return parse_hex("#9fb0c4");
-    if (lowered == "quiet") return parse_hex("#c3ccd6");
-    if (lowered == "plain") return parse_hex("#f2f2f2");
-    if (lowered == "warm") return parse_hex("#f5dcc0");
-    if (lowered == "bright") return parse_hex("#ffe9a8");
+    static constexpr Rgb kSomber{0x9f, 0xb0, 0xc4};
+    static constexpr Rgb kQuiet{0xc3, 0xcc, 0xd6};
+    static constexpr Rgb kPlain{0xf2, 0xf2, 0xf2};
+    static constexpr Rgb kWarm{0xf5, 0xdc, 0xc0};
+    static constexpr Rgb kBright{0xff, 0xe9, 0xa8};
+    if (ascii_iequals(name, "somber")) return kSomber;
+    if (ascii_iequals(name, "quiet")) return kQuiet;
+    if (ascii_iequals(name, "plain")) return kPlain;
+    if (ascii_iequals(name, "warm")) return kWarm;
+    if (ascii_iequals(name, "bright")) return kBright;
     if (is_hex_colour(name)) return parse_hex(name);
-    return parse_hex("#f2f2f2");
+    return kPlain;
 }
 
 Rgb comment_colour(double progress) {
-    return mix(parse_hex(kCommentDim), parse_hex(kCommentLit), progress);
+    static const Rgb dim = parse_hex(kCommentDim);
+    static const Rgb lit = parse_hex(kCommentLit);
+    return mix(dim, lit, progress);
 }
 
 double word_fill(double word_clock, double word_seconds, double now) {
@@ -249,10 +300,12 @@ std::string preview_text(std::string_view text, int width) {
         space = false;
         flat.push_back(c);
     }
-    if (static_cast<int>(flat.size()) <= width) {
+    const int limit = std::max(0, width);
+    if (utf8_count(flat) <= limit) {
         return flat;
     }
-    return flat.substr(0, static_cast<std::size_t>(std::max(0, width - 1))) + "\u2026";
+    const std::size_t keep = static_cast<std::size_t>(limit > 0 ? limit - 1 : 0);
+    return flat.substr(0, utf8_prefix_bytes(flat, keep)) + "\u2026";
 }
 
 std::string human_size(std::uint64_t bytes) {
@@ -274,6 +327,7 @@ std::string human_size(std::uint64_t bytes) {
 }
 
 std::string format_age(double opened, double now) {
+    if (!(opened > 0.0)) return "unknown";
     const double delta = std::max(0.0, now - opened);
     char buffer[64];
     if (delta < 60.0) return "just now";
@@ -355,6 +409,22 @@ std::vector<std::pair<std::string, int>> paragraph_blocks(std::string_view text)
     std::vector<std::pair<std::string, int>> blocks;
     std::size_t start = 0;
     std::size_t i = 0;
+    int line = 1;
+    std::size_t line_cursor = 0;
+    auto line_at = [&](std::size_t offset) {
+        while (line_cursor < offset) {
+            if (text[line_cursor] == '\n') ++line;
+            ++line_cursor;
+        }
+        return line;
+    };
+    auto append_block = [&](std::size_t from, std::size_t to) {
+        const std::string raw(text.substr(from, to - from));
+        const std::string body = trim(raw);
+        if (body.empty()) return;
+        const std::size_t offset = from + raw.find(body);
+        blocks.emplace_back(body, line_at(offset));
+    };
     while (i + 1 < text.size()) {
         if (text[i] == '\n') {
             std::size_t j = i + 1;
@@ -363,16 +433,7 @@ std::vector<std::pair<std::string, int>> paragraph_blocks(std::string_view text)
                 ++j;
             }
             if (j < text.size() && text[j] == '\n') {
-                const std::string raw(text.substr(start, i - start));
-                const std::string body = trim(raw);
-                if (!body.empty()) {
-                    const std::size_t offset = start + raw.find(body);
-                    int line = 1;
-                    for (std::size_t k = 0; k < offset; ++k) {
-                        if (text[k] == '\n') ++line;
-                    }
-                    blocks.emplace_back(body, line);
-                }
+                append_block(start, i);
                 start = j + 1;
                 i = start;
                 continue;
@@ -380,16 +441,7 @@ std::vector<std::pair<std::string, int>> paragraph_blocks(std::string_view text)
         }
         ++i;
     }
-    const std::string raw(text.substr(start));
-    const std::string body = trim(raw);
-    if (!body.empty()) {
-        const std::size_t offset = start + raw.find(body);
-        int line = 1;
-        for (std::size_t k = 0; k < offset; ++k) {
-            if (text[k] == '\n') ++line;
-        }
-        blocks.emplace_back(body, line);
-    }
+    append_block(start, text.size());
     return blocks;
 }
 
@@ -447,7 +499,7 @@ std::vector<Token> parse_tokens(std::string_view raw, ParseState& state,
     std::smatch match;
     if (std::regex_match(body, match, wrapped_timed)) {
         const std::string text = "[" + trim(match[2].str()) + "]";
-        const double seconds = std::max(0.0, std::min(kWordMaxSeconds, std::stod(match[1].str())));
+        const double seconds = parse_duration_value(match[1].str());
         if (seconds <= 0.0) {
             issue(0, "comment", text, "has zero duration; use a positive [seconds] time");
         }
@@ -525,8 +577,7 @@ std::vector<Token> parse_tokens(std::string_view raw, ParseState& state,
                 const std::string raw_token = body.substr(i, close - i + 1);
                 std::smatch duration_match;
                 if (std::regex_match(raw_token, duration_match, duration_regex())) {
-                    pending = std::max(0.0, std::min(kWordMaxSeconds,
-                                                     std::stod(duration_match[1].str())));
+                    pending = parse_duration_value(duration_match[1].str());
                     i = close + 1;
                     continue;
                 }
@@ -562,51 +613,59 @@ std::vector<Token> parse_tokens(std::string_view raw, ParseState& state,
 }
 
 Paragraph finish_paragraph(const std::vector<Token>& tokens, double clock) {
-    std::vector<std::string> raw_parts;
-    for (const Token& token : tokens) {
-        if (!token.text.empty()) raw_parts.push_back(token.text);
-    }
+    std::vector<std::string> plain_parts(tokens.size());
+    std::vector<int> char_starts(tokens.size(), 0);
+    std::vector<int> byte_starts(tokens.size(), 0);
     std::string raw_display;
-    for (std::size_t i = 0; i < raw_parts.size(); ++i) {
-        if (i != 0) raw_display.push_back(' ');
-        raw_display += raw_parts[i];
-    }
-    if (raw_display.empty()) raw_display = " ";
-
-    const std::string plain_display = strip_stars(raw_display);
-    std::vector<Word> words;
+    std::string plain_display;
     int cursor_chars = 0;
     std::size_t cursor_bytes = 0;
-    double running = clock;
 
-    for (const Token& token : tokens) {
-        const std::string plain_word = strip_stars(token.text);
-        int char_start = cursor_chars;
-        int byte_start = static_cast<int>(cursor_bytes);
-        if (!plain_word.empty()) {
-            const std::size_t found = plain_display.find(plain_word, cursor_bytes);
-            if (found != std::string::npos) {
-                char_start = utf8_count(std::string_view(plain_display).substr(0, found));
-                byte_start = static_cast<int>(found);
-            }
+    for (std::size_t i = 0; i < tokens.size(); ++i) {
+        const Token& token = tokens[i];
+        if (token.text.empty()) {
+            char_starts[i] = cursor_chars;
+            byte_starts[i] = static_cast<int>(cursor_bytes);
+            continue;
         }
+        if (!raw_display.empty()) {
+            raw_display.push_back(' ');
+            plain_display.push_back(' ');
+            ++cursor_chars;
+            ++cursor_bytes;
+        }
+        std::string& plain = plain_parts[i];
+        plain = strip_stars(token.text);
+        char_starts[i] = cursor_chars;
+        byte_starts[i] = static_cast<int>(cursor_bytes);
+        raw_display += token.text;
+        plain_display += plain;
+        cursor_chars += utf8_count(plain);
+        cursor_bytes += plain.size();
+    }
+    if (raw_display.empty()) {
+        raw_display = " ";
+        plain_display = " ";
+    }
+
+    std::vector<Word> words;
+    words.reserve(tokens.size());
+    double running = clock;
+    for (std::size_t i = 0; i < tokens.size(); ++i) {
+        const Token& token = tokens[i];
         Word word;
-        word.text = plain_word;
+        word.text = std::move(plain_parts[i]);
         word.seconds = token.seconds;
         word.mood = token.mood;
         word.theme = token.theme;
-        word.char_start = char_start;
-        word.byte_start = byte_start;
+        word.char_start = char_starts[i];
+        word.byte_start = byte_starts[i];
         word.clock = running;
         word.is_comment = token.is_comment;
         word.bold = has_bold_markup(token.text);
         word.italic = has_italic_markup(token.text);
         words.push_back(std::move(word));
         running += token.seconds;
-        if (!plain_word.empty()) {
-            cursor_chars = char_start + utf8_count(plain_word) + 1;
-            cursor_bytes = static_cast<std::size_t>(byte_start) + plain_word.size() + 1;
-        }
     }
 
     Paragraph paragraph;
@@ -711,8 +770,10 @@ std::string section_title(const Paragraph& paragraph, int width) {
     }
     text = collapse_spaces(text);
     if (text.empty()) return "Hold";
-    if (static_cast<int>(text.size()) <= width) return text;
-    return text.substr(0, static_cast<std::size_t>(std::max(0, width - 1))) + "\u2026";
+    const int limit = std::max(0, width);
+    if (utf8_count(text) <= limit) return text;
+    const std::size_t keep = static_cast<std::size_t>(limit > 0 ? limit - 1 : 0);
+    return text.substr(0, utf8_prefix_bytes(text, keep)) + "\u2026";
 }
 
 std::optional<SectionState> section_state(const std::vector<Paragraph>& plan, double now,
@@ -807,7 +868,13 @@ int print_timing(const std::string& path, bool show_words) {
     std::printf("   start   time  kind  mood     paragraph\n");
     for (const Paragraph& paragraph : plan) {
         std::string body = preview_text(paragraph.text);
-        if (!paragraph.theme.empty()) body = paragraph.theme + ": " + body;
+        if (!paragraph.theme.empty()) {
+            std::string combined = paragraph.theme;
+            combined.reserve(combined.size() + 2 + body.size());
+            combined += ": ";
+            combined += body;
+            body = std::move(combined);
+        }
         std::printf(" %7s  %5.1fs  %s  %-7s  %s\n",
                     format_time(paragraph.start).c_str(), paragraph.seconds,
                     paragraph.is_direction ? "note" : "say ", paragraph.mood.c_str(),
@@ -861,9 +928,12 @@ std::string sample_script_text() {
             }
         }
     }
-    const std::string beside_exe = exe_dir_hint() + "/samples/test-script.txt";
-    for (const std::string& candidate : {beside_exe, std::string("samples/test-script.txt"),
-                                         std::string("../samples/test-script.txt")}) {
+    std::vector<std::string> candidates;
+    const std::string exe_dir = exe_dir_hint();
+    if (!exe_dir.empty()) candidates.push_back(exe_dir + "/samples/test-script.txt");
+    candidates.push_back("samples/test-script.txt");
+    candidates.push_back("../samples/test-script.txt");
+    for (const std::string& candidate : candidates) {
         if (fs::is_regular_file(candidate, ec)) {
             std::ifstream in(candidate, std::ios::binary);
             if (in) {
@@ -878,8 +948,11 @@ std::string sample_script_text() {
 
 std::string default_script_path() {
     std::error_code ec;
-    const std::string beside_exe = exe_dir_hint() + "/script.txt";
-    if (std::filesystem::is_regular_file(beside_exe, ec)) return beside_exe;
+    const std::string exe_dir = exe_dir_hint();
+    if (!exe_dir.empty()) {
+        const std::string beside_exe = exe_dir + "/script.txt";
+        if (std::filesystem::is_regular_file(beside_exe, ec)) return beside_exe;
+    }
     return "script.txt";
 }
 
@@ -919,10 +992,11 @@ double Timeline::pos_from_weight(double weight) const {
     const auto it = std::upper_bound(cum_.begin(), cum_.end(), weight);
     int index = static_cast<int>(it - cum_.begin()) - 1;
     index = std::max(0, std::min(index, static_cast<int>(cum_.size()) - 2));
-    const double w0 = cum_[static_cast<std::size_t>(index)];
-    const double w1 = cum_[static_cast<std::size_t>(index + 1)];
-    const double p0 = knots_[static_cast<std::size_t>(index)];
-    const double p1 = knots_[static_cast<std::size_t>(index + 1)];
+    const std::size_t at = static_cast<std::size_t>(index);
+    const double w0 = cum_[at];
+    const double w1 = cum_[at + 1];
+    const double p0 = knots_[at];
+    const double p1 = knots_[at + 1];
     if (w1 <= w0) return p1;
     return p0 + (std::min(weight, w1) - w0) / (w1 - w0) * (p1 - p0);
 }

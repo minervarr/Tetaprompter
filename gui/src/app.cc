@@ -6,10 +6,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string_view>
 
@@ -37,7 +36,6 @@ namespace fs = std::filesystem;
 const Rgb kBg = parse_hex("#000000");
 const Rgb kLibraryBg = parse_hex("#0a0a0c");
 const Rgb kPanel = parse_hex("#151518");
-const Rgb kPanelHover = parse_hex("#1d1d22");
 const Rgb kText = parse_hex("#f2f2f2");
 const Rgb kDim = parse_hex("#8a93a0");
 const Rgb kFaint = parse_hex("#5f6874");
@@ -45,8 +43,21 @@ const Rgb kAmber = parse_hex("#f0a03c");
 const Rgb kAmberLit = parse_hex("#ffb45c");
 const Rgb kRed = parse_hex("#ff5f56");
 const Rgb kAmberComment = parse_hex("#f0c27a");
+const Rgb kKaraokeGrayRgb = parse_hex(tp::kKaraokeGray);
+const Rgb kBorder = parse_hex("#3a3a42");
+const Rgb kCardBorder = parse_hex("#2a2a30");
+const Rgb kSoft = parse_hex("#cfcfcf");
+const Rgb kStateText = parse_hex("#9aa4b2");
+const Rgb kThemeText = parse_hex("#b99a6a");
+const Rgb kErrorText = parse_hex("#ff8a80");
+const Rgb kButtonInk = parse_hex("#141414");
+const Rgb kSelectedBg = parse_hex("#2a2114");
+const Rgb kSamplePanel = parse_hex("#17161a");
+const Rgb kSampleBorder = parse_hex("#5a4327");
+const Rgb kSampleBadge = parse_hex("#3a2a14");
+const Rgb kModalBg = parse_hex("#050506");
+const Rgb kModalPanel = parse_hex("#18181b");
 
-constexpr double kTickSeconds = 0.016;
 constexpr float kHudHeight = 46.0f;
 constexpr float kHudMargin = 12.0f;
 constexpr float kCueStep = 0.02f;
@@ -91,6 +102,42 @@ std::string parent_of(const std::string& path) {
     return fs::path(path).parent_path().string();
 }
 
+std::string font_setting_value(const gui::FontPreset& preset) {
+    // Keep the original directory for custom face collections so bold/italic
+    // faces are rediscovered on the next launch. A single file is also valid.
+    if (preset.id.rfind("custom:", 0) == 0) return preset.id.substr(7);
+    return preset.id;
+}
+
+// Truncate at a UTF-8 boundary and add an ellipsis, measured with the actual
+// selected face. Used where fixed-width labels share a row.
+std::string fit_text(const gui::TextPainter& painter, std::string_view text,
+                     float max_width, float size, FontStyle style) {
+    if (text.empty() || max_width <= 0.0f) return {};
+    if (painter.width(text, size, style) <= max_width) return std::string(text);
+    constexpr std::string_view kEllipsis = "\u2026";
+    const float ellipsis_width = painter.width(kEllipsis, size, style);
+    if (ellipsis_width > max_width) return {};
+    const float budget = max_width - ellipsis_width;
+    std::string out;
+    out.reserve(text.size());
+    std::size_t i = 0;
+    while (i < text.size()) {
+        const std::size_t begin = i;
+        ++i;
+        while (i < text.size() &&
+               (static_cast<unsigned char>(text[i]) & 0xC0) == 0x80) {
+            ++i;
+        }
+        std::string candidate = out;
+        candidate.append(text.substr(begin, i - begin));
+        if (painter.width(candidate, size, style) > budget) break;
+        out = std::move(candidate);
+    }
+    out += kEllipsis;
+    return out;
+}
+
 bool is_script_file(const fs::path& path) {
     if (!path.has_extension()) return false;
     std::string ext = path.extension().string();
@@ -121,12 +168,16 @@ bool App::create() {
     fullscreen_ = !options_.windowed;
     compute_font();
 
+    const bool explicit_font = !options_.font.empty();
+    bool requested_font_loaded = false;
     std::string requested_font = options_.font;
     if (requested_font.empty()) requested_font = load_font_setting();
     if (requested_font.empty()) requested_font = "newcm";
     gui::FontPreset font_preset;
     std::string font_choice_error;
-    if (!gui::make_font_preset(requested_font, font_preset, font_choice_error)) {
+    if (gui::make_font_preset(requested_font, font_preset, font_choice_error)) {
+        requested_font_loaded = true;
+    } else {
         startup_font_error_ = font_choice_error + " — using New Computer Modern";
         font_preset = *gui::find_font_preset("newcm");
     }
@@ -134,6 +185,7 @@ bool App::create() {
     std::string font_error;
     if (!text_.load(*host_, font_preset, font_error)) {
         // A missing/broken chosen face must not prevent the app from opening.
+        requested_font_loaded = false;
         startup_font_error_ = font_error + " — using New Computer Modern";
         font_preset = *gui::find_font_preset("newcm");
         if (!text_.load(*host_, font_preset, font_error)) {
@@ -142,12 +194,20 @@ bool App::create() {
             return false;
         }
     }
-    current_font_ = font_preset;
+    current_font_ = std::move(font_preset);
+    if (explicit_font && requested_font_loaded) {
+        save_font_setting(font_setting_value(current_font_));
+    }
     if (!create_renderer()) return false;
 
-    recorder_ = std::make_unique<Recorder>(RecorderOptions{
-        options_.device, options_.audio, options_.size, options_.fps, 23,
-        host_->exeDir() + "recordings"});
+    RecorderOptions recorder_options;
+    recorder_options.device = options_.device;
+    recorder_options.audio = options_.audio;
+    recorder_options.size = options_.size;
+    recorder_options.fps = options_.fps;
+    recorder_options.out_dir =
+        (fs::path(host_->exeDir()) / "recordings").generic_string();
+    recorder_ = std::make_unique<Recorder>(std::move(recorder_options));
 
     seed_recents();
     refresh_library();
@@ -182,10 +242,10 @@ bool App::create_host() {
     WindowOptions window;
     window.width = 1180;
     window.height = 760;
-    // Fullscreen on the requested output by default. A windowed Wayland
-    // window cannot choose its monitor; making the initial window fullscreen
-    // on DP-2 is what keeps automated runs and the library off another
-    // monitor's focused workspace. --windowed restores the old windowed start.
+    // Fullscreen by default. An empty output lets the compositor place the
+    // window on its current monitor; --output pins a specific connector. A
+    // windowed Wayland surface cannot choose its own monitor, so --windowed
+    // leaves placement to the compositor.
     window.fullscreen = !options_.windowed;
     window.output = options_.output;
     host_->setWindowOptions(window);
@@ -211,20 +271,21 @@ bool App::create_renderer() {
 
 void App::compute_font() {
     const MonitorInfo monitor = host_->primaryMonitor();
-    const float height = monitor.bounds.bottom - monitor.bounds.top;
+    const float height = static_cast<float>(monitor.bounds.bottom - monitor.bounds.top);
     const float basis = height > 0.0f ? height : 1200.0f;
     font_px_ = clampf(std::round(basis * 0.055f), 28.0f, 120.0f);
     script_px_ = font_px_;
 }
 
 void App::seed_recents() {
-    if (fs::exists(fs::path(recents_path()))) {
+    std::error_code ec;
+    if (fs::exists(fs::path(recents_path()), ec)) {
         recents_ = load_recents();
         return;
     }
     recents_.clear();
     const fs::path beside = fs::path(host_->exeDir()) / "script.txt";
-    if (fs::is_regular_file(beside)) {
+    if (fs::is_regular_file(beside, ec)) {
         recents_ = remember_recent({}, beside.generic_string());
         save_recents(recents_);
     }
@@ -260,7 +321,8 @@ void App::refresh_library() {
     if (library_selected_ >= static_cast<int>(library_entries_.size())) {
         library_selected_ = std::max(0, static_cast<int>(library_entries_.size()) - 1);
     }
-    collect_all_text();
+    library_reveal_ = true;
+    text_dirty_ = true;
     needs_redraw_ = true;
 }
 
@@ -303,9 +365,7 @@ void App::open_font_menu() {
     for (std::size_t i = 0; i < presets.size(); ++i) {
         if (presets[i].id == current_font_.id) font_menu_selected_ = static_cast<int>(i);
     }
-    text_.collect("Script font");
-    text_.collect("Enter applies · Esc closes");
-    for (const gui::FontPreset& preset : presets) text_.collect(preset.label);
+    text_dirty_ = true;
     needs_redraw_ = true;
 }
 
@@ -316,14 +376,10 @@ void App::apply_font(const gui::FontPreset& preset, bool persist, bool announce)
         return;
     }
     current_font_ = preset;
-    if (persist) {
-        const std::string saved = preset.id.rfind("custom:", 0) == 0
-            ? preset.regular : preset.id;
-        save_font_setting(saved);
-    }
+    if (persist) save_font_setting(font_setting_value(preset));
     msdf_initialized_ = false;
-    collect_all_text();
-    sync_font();
+    font_dirty_ = true;
+    text_dirty_ = true;
     layout_dirty_ = true;
     needs_redraw_ = true;
     if (announce) show_message("Font: " + preset.label);
@@ -359,7 +415,7 @@ void App::load_picker() {
     if (picker_selected_ >= static_cast<int>(picker_entries_.size())) {
         picker_selected_ = std::max(0, static_cast<int>(picker_entries_.size()) - 1);
     }
-    for (const PickerEntry& entry : picker_entries_) text_.collect(entry.name);
+    text_dirty_ = true;
     needs_redraw_ = true;
 }
 
@@ -497,8 +553,11 @@ void App::reload_script(bool notify) {
                 else if (!word.text.empty()) ++words;
             }
         }
-        show_message("Reloaded " + (is_sample_ ? std::string("Test script")
-                                               : fs::path(*script_path_).filename().string()) +
+        const std::string name = is_sample_
+            ? std::string("Test script")
+            : (script_path_ ? fs::path(*script_path_).filename().string()
+                            : std::string("script"));
+        show_message("Reloaded " + name +
                      " (" + std::to_string(words) + " words, " +
                      std::to_string(comments) + " comments, " +
                      format_time(duration_) + ")");
@@ -550,7 +609,7 @@ void App::apply_plan(std::vector<Paragraph> plan, std::vector<std::string> warni
         if (warnings.size() > 1) text += " (+" + std::to_string(warnings.size() - 1) + " more)";
         show_message(text, true, 8.0);
     }
-    collect_all_text();
+    text_dirty_ = true;
 }
 
 void App::reset_playback() {
@@ -570,8 +629,6 @@ void App::rebuild_layout() {
     }
     gui::ScriptMetrics metrics;
     metrics.width = static_cast<float>(renderer_->width());
-    metrics.height = static_cast<float>(renderer_->height());
-    metrics.cue_y = metrics.height * cue_fraction_;
     metrics.font_px = script_px_ * current_font_.size_scale;
     metrics.centered = centered_;
     layout_ = gui::build_script_layout(plan_, text_, metrics);
@@ -611,7 +668,7 @@ void App::show_message(const std::string& text, bool error, double seconds) {
     message_ = text;
     message_error_ = error;
     message_until_ = now_monotonic() + seconds;
-    text_.collect(text);
+    text_dirty_ = true;
     needs_redraw_ = true;
 }
 
@@ -667,11 +724,10 @@ void App::toggle_play() {
         show_message("No script loaded");
         return;
     }
-    if (renderer_ && (layout_.glyphs.empty() || layout_dirty_ ||
+    if (renderer_ && (layout_dirty_ ||
                       renderer_->width() != layout_width_ ||
                       renderer_->height() != layout_height_)) {
-        collect_all_text();
-        sync_font();
+        refresh_text_font();
         rebuild_layout();
         rebuild_timeline();
         layout_dirty_ = false;
@@ -715,7 +771,6 @@ void App::cycle_cue() {
         }
     }
     cue_fraction_ = next;
-    layout_dirty_ = true;
     needs_redraw_ = true;
     show_message("Reading line: " + std::to_string(static_cast<int>(std::lround(cue_fraction_ * 100))) + "%");
 }
@@ -814,9 +869,8 @@ void App::tick() {
     if (renderer_->width() != layout_width_ || renderer_->height() != layout_height_) {
         layout_dirty_ = true;
     }
-    if (layout_dirty_ || (layout_.glyphs.empty() && !plan_.empty())) {
-        collect_all_text();
-        sync_font();
+    if (layout_dirty_) {
+        refresh_text_font();
         rebuild_layout();
         rebuild_timeline();
         layout_dirty_ = false;
@@ -860,6 +914,7 @@ void App::tick() {
 void App::onHostResized() {
     if (renderer_) renderer_->notifyResized();
     layout_dirty_ = true;
+    library_reveal_ = true;
     needs_redraw_ = true;
 }
 
@@ -873,6 +928,7 @@ void App::onHostExposed() {
 }
 
 void App::onTimer(int timerId) {
+    if (!host_) return;
     if (timerId == 1) tick();
 }
 
@@ -919,8 +975,9 @@ bool is_toggle_key(int key) {
 } // namespace
 
 void App::onKeyDownPortable(int keyCode) {
+    if (!host_) return;
     if (keyCode == key::Control) { ctrl_down_ = true; return; }
-    if (keyCode == key::Shift) { shift_down_ = true; return; }
+    if (keyCode == key::Shift) return;
 
     const double now = now_monotonic();
     const int slot = keyCode & 0xFF;
@@ -961,7 +1018,7 @@ void App::onKeyDownPortable(int keyCode) {
         case key::Enter: {
             const int index = std::max(0, std::min(font_menu_selected_,
                                                   static_cast<int>(presets.size()) - 1));
-            const gui::FontPreset preset = presets[static_cast<std::size_t>(index)];
+            const gui::FontPreset& preset = presets[static_cast<std::size_t>(index)];
             font_menu_open_ = false;
             apply_font(preset, true);
             break;
@@ -1035,13 +1092,17 @@ void App::onKeyDownPortable(int keyCode) {
         if (library_entries_.empty()) return;
         if (keyCode == key::Up) {
             library_selected_ = std::max(0, library_selected_ - 1);
+            library_reveal_ = true;
         } else if (keyCode == key::Down) {
             library_selected_ = std::min(static_cast<int>(library_entries_.size()) - 1,
                                          library_selected_ + 1);
+            library_reveal_ = true;
         } else if (keyCode == key::Home) {
             library_selected_ = 0;
+            library_reveal_ = true;
         } else if (keyCode == key::End) {
             library_selected_ = static_cast<int>(library_entries_.size()) - 1;
+            library_reveal_ = true;
         } else if (keyCode == key::Enter || keyCode == key::Space) {
             const LibraryEntry& entry = library_entries_[static_cast<std::size_t>(library_selected_)];
             if (entry.sample) open_test_script();
@@ -1083,9 +1144,9 @@ void App::onKeyDownPortable(int keyCode) {
         show_message(mood_on_ ? "Mood colours on" : "Mood colours off"); break;
     case 0x4C: case 0x74: reload_script(true); break;
     case key::Up: cue_fraction_ = clampf(cue_fraction_ - kCueStep, kCueMin, kCueMax);
-        layout_dirty_ = true; needs_redraw_ = true; break;
+        needs_redraw_ = true; break;
     case key::Down: cue_fraction_ = clampf(cue_fraction_ + kCueStep, kCueMin, kCueMax);
-        layout_dirty_ = true; needs_redraw_ = true; break;
+        needs_redraw_ = true; break;
     case key::Left: nudge(-std::max(60.0, renderer_->height() * 0.15)); break;
     case key::Right: nudge(std::max(60.0, renderer_->height() * 0.15)); break;
     case key::Home: seek(0.0); break;
@@ -1096,10 +1157,12 @@ void App::onKeyDownPortable(int keyCode) {
 
 void App::onKeyUpPortable(int keyCode) {
     if (keyCode == key::Control) ctrl_down_ = false;
-    if (keyCode == key::Shift) shift_down_ = false;
 }
 
 void App::onMouseMove(int x, int y) {
+    // The Wayland backend can dispatch a final pointer event while the host is
+    // being torn down, after App::run() has already reset host_.
+    if (!host_) return;
     last_motion_t_ = now_monotonic();
     if (hud_dimmed_) {
         hud_dimmed_ = false;
@@ -1114,6 +1177,7 @@ void App::onMouseMove(int x, int y) {
 }
 
 void App::onMouseLeave() {
+    if (!host_) return;
     if (cursor_ != 0) {
         cursor_ = 0;
         host_->setCursor(CursorShape::Arrow);
@@ -1121,6 +1185,7 @@ void App::onMouseLeave() {
 }
 
 void App::onLButtonDown(int x, int y) {
+    if (!host_) return;
     const float fx = static_cast<float>(x);
     const float fy = static_cast<float>(y);
     if (help_visible_) {
@@ -1191,6 +1256,7 @@ void App::onLButtonDown(int x, int y) {
 void App::onLButtonUp(int, int) {}
 
 void App::onMouseWheel(int x, int y, int delta) {
+    if (!host_) return;
     (void)x;
     (void)y;
     if (font_menu_open_) return;
@@ -1202,6 +1268,7 @@ void App::onMouseWheel(int x, int y, int delta) {
     }
     if (!is_prompter()) {
         library_scroll_ = std::max(0.0f, library_scroll_ - delta * 0.6f);
+        library_reveal_ = false;
         needs_redraw_ = true;
         return;
     }
@@ -1223,31 +1290,42 @@ void App::collect_all_text() {
         "Keyboard shortcuts", "Esc or ? closes this card", "SAMPLE", "Hold",
         "Script font", "Font", "Enter applies · Esc closes", "Current",
     };
-    for (const char* text : fixed) text_.collect(text);
+    bool added = false;
+    auto collect = [&](std::string_view value) {
+        added = text_.collect(value) || added;
+    };
+    for (const char* text : fixed) collect(text);
     for (const auto& [keys, description] : key_help()) {
-        text_.collect(keys);
-        text_.collect(description);
+        collect(keys);
+        collect(description);
     }
     for (const Paragraph& paragraph : plan_) {
-        text_.collect(paragraph.text);
-        text_.collect(paragraph.theme);
+        collect(paragraph.text);
+        collect(paragraph.theme);
         for (const Word& word : paragraph.words) {
-            text_.collect(word.text);
-            text_.collect(word.theme);
+            collect(word.text);
+            collect(word.theme);
         }
     }
     for (const LibraryEntry& entry : library_entries_) {
-        text_.collect(entry.title);
-        text_.collect(entry.subtitle);
-        text_.collect(entry.meta);
+        collect(entry.title);
+        collect(entry.subtitle);
+        collect(entry.meta);
     }
-    for (const PickerEntry& entry : picker_entries_) text_.collect(entry.name);
-    for (const gui::FontPreset& preset : gui::font_presets()) text_.collect(preset.label);
-    text_.collect(current_font_.label);
-    text_.collect(picker_dir_);
-    text_.collect(message_);
-    text_.collect(theme_text());
-    if (recorder_) text_.collect(fs::path(recorder_->path()).filename().string());
+    for (const PickerEntry& entry : picker_entries_) collect(entry.name);
+    for (const gui::FontPreset& preset : gui::font_presets()) collect(preset.label);
+    collect(current_font_.label);
+    collect(picker_dir_);
+    collect(message_);
+    collect(theme_text());
+    if (recorder_) collect(fs::path(recorder_->path()).filename().string());
+    font_dirty_ = font_dirty_ || added;
+    text_dirty_ = false;
+}
+
+void App::refresh_text_font() {
+    if (text_dirty_) collect_all_text();
+    if (font_dirty_ || !msdf_initialized_) sync_font();
 }
 
 void App::sync_font() {
@@ -1264,6 +1342,7 @@ void App::sync_font() {
         renderer_->initMsdf(*text_.font());
         msdf_initialized_ = true;
     }
+    font_dirty_ = false;
 }
 
 void App::put_text(std::string_view text, float x, float top, float size, Rgb colour,
@@ -1297,8 +1376,7 @@ void App::draw_frame() {
     const uint32_t height = renderer_->height();
     if (width == 0 || height == 0) return;
 
-    collect_all_text();
-    sync_font();
+    refresh_text_font();
 
     if (is_prompter() && (layout_dirty_ || width != layout_width_ || height != layout_height_)) {
         rebuild_layout();
@@ -1366,18 +1444,18 @@ void App::draw_library(Canvas& canvas) {
     const float font_w = std::min(230.0f, std::max(150.0f, open_x - 38.0f - 180.0f));
     const float font_x = open_x - 14.0f - font_w;
     canvas.rect(font_x, 32, font_w, 42, rgb(kPanel), 10);
-    canvas.rect(font_x, 32, font_w, 1, rgb(parse_hex("#3a3a42")));
-    canvas.rect(font_x, 73, font_w, 1, rgb(parse_hex("#3a3a42")));
+    canvas.rect(font_x, 32, font_w, 1, rgb(kBorder));
+    canvas.rect(font_x, 73, font_w, 1, rgb(kBorder));
     add_hit("font", font_x, 32, font_w, 42);
     put_text(preview_text("Font: " + current_font_.label, 26), font_x + 14, 43, 13,
-             parse_hex("#cfcfcf"));
+             kSoft);
     canvas.rect(open_x, 32, open_w, 42, rgb(kAmber), 10);
     add_hit("open", open_x, 32, open_w, 42);
-    put_text("Open script", open_x + open_w * 0.5f, 43, 15, parse_hex("#141414"),
+    put_text("Open script", open_x + open_w * 0.5f, 43, 15, kButtonInk,
              FontStyle::Bold, 1.0f, true);
 
     if (message_visible()) {
-        const Rgb colour = message_error_ ? parse_hex("#ff8a80") : parse_hex("#cfcfcf");
+        const Rgb colour = message_error_ ? kErrorText : kSoft;
         put_text(message_, 38, 96, 13, colour);
     }
 
@@ -1388,23 +1466,50 @@ void App::draw_library(Canvas& canvas) {
     const float row_h = card_h + card_gap;
     const int recent_count = std::max(0, static_cast<int>(library_entries_.size()) - 1);
     const int rows = (recent_count + columns - 1) / columns;
+    const float sample_offset =
+        (rows > 0 ? static_cast<float>(rows) * row_h : 52.0f) + 16.0f + 26.0f;
+    const float content_bottom = 158.0f + sample_offset + card_h;
+    const float max_scroll = std::max(0.0f, content_bottom - (height - 24.0f));
+    library_scroll_ = clampf(library_scroll_, 0.0f, max_scroll);
+
+    if (library_reveal_) {
+        float selected_offset = -1.0f;
+        if (library_selected_ == static_cast<int>(library_entries_.size()) - 1) {
+            selected_offset = sample_offset;
+        } else if (library_selected_ >= 0 && library_selected_ < recent_count) {
+            const int row = library_selected_ / columns;
+            selected_offset = static_cast<float>(row) * row_h;
+        }
+        if (selected_offset >= 0.0f) {
+            const float top = 158.0f;
+            const float bottom = height - 24.0f;
+            const float y = 158.0f - library_scroll_ + selected_offset;
+            if (y < top) {
+                library_scroll_ = std::max(0.0f, library_scroll_ - (top - y));
+            } else if (y + card_h > bottom) {
+                library_scroll_ += y + card_h - bottom;
+            }
+            library_scroll_ = clampf(library_scroll_, 0.0f, max_scroll);
+        }
+        library_reveal_ = false;
+    }
 
     put_text("RECENT SCRIPTS", 38, 132, 12, kDim, FontStyle::Bold);
 
-    float start_y = 158.0f - library_scroll_;
+    const float start_y = 158.0f - library_scroll_;
     if (recent_count == 0) {
-        put_text("No recent scripts yet", 38, start_y + 4, 16, parse_hex("#cfcfcf"), FontStyle::Bold);
+        put_text("No recent scripts yet", 38, start_y + 4, 16, kSoft, FontStyle::Bold);
         put_text("Open a script and it will appear here next time.", 38, start_y + 30, 13, kDim);
     } else {
         for (int i = 0; i < recent_count; ++i) {
             const int col = i % columns;
             const int row = i / columns;
-            const float x = 38.0f + col * (card_w + card_gap);
-            const float y = start_y + row * row_h;
+            const float x = 38.0f + static_cast<float>(col) * (card_w + card_gap);
+            const float y = start_y + static_cast<float>(row) * row_h;
             if (y + card_h < 130 || y > height - 24) continue;
             const LibraryEntry& entry = library_entries_[static_cast<std::size_t>(i)];
             canvas.rect(x, y, card_w, card_h, rgb(kPanel), 12);
-            const Rgb border = i == library_selected_ ? kAmber : parse_hex("#2a2a30");
+            const Rgb border = i == library_selected_ ? kAmber : kCardBorder;
             canvas.rect(x, y, card_w, 1, rgb(border));
             canvas.rect(x, y + card_h - 1, card_w, 1, rgb(border));
             canvas.rect(x, y, 1, card_h, rgb(border));
@@ -1413,18 +1518,18 @@ void App::draw_library(Canvas& canvas) {
             put_text(preview_text(entry.title, 34), x + 16, y + 14, 16, kText, FontStyle::Bold);
             put_text(preview_text(entry.subtitle, 44), x + 16, y + 44, 12, kDim);
             put_text(entry.meta, x + 16, y + 74, 12,
-                     entry.valid ? parse_hex("#9aa4b2") : kAmber);
+                     entry.valid ? kStateText : kAmber);
         }
     }
 
-    const float sample_heading = start_y + (rows > 0 ? rows * row_h : 52.0f) + 16.0f;
+    const float sample_heading = start_y + sample_offset - 26.0f;
     put_text("ALWAYS AVAILABLE", 38, sample_heading, 12, kDim, FontStyle::Bold);
-    const float sample_y = sample_heading + 26.0f;
+    const float sample_y = start_y + sample_offset;
     const LibraryEntry& sample = library_entries_.back();
     if (sample_y + card_h > 120 && sample_y < height - 24) {
         const bool selected = library_selected_ == static_cast<int>(library_entries_.size()) - 1;
-        canvas.rect(38, sample_y, card_w, card_h, rgb(parse_hex("#17161a")), 12);
-        const Rgb border = selected ? kAmber : parse_hex("#5a4327");
+        canvas.rect(38, sample_y, card_w, card_h, rgb(kSamplePanel), 12);
+        const Rgb border = selected ? kAmber : kSampleBorder;
         canvas.rect(38, sample_y, card_w, 1, rgb(border));
         canvas.rect(38, sample_y + card_h - 1, card_w, 1, rgb(border));
         canvas.rect(38, sample_y, 1, card_h, rgb(border));
@@ -1436,7 +1541,7 @@ void App::draw_library(Canvas& canvas) {
         put_text(sample.meta, 54, sample_y + 74, 12, kAmber);
         const float badge_w = 62.0f;
         canvas.rect(38 + card_w - badge_w - 14, sample_y + 14, badge_w, 20,
-                    rgb(parse_hex("#3a2a14")), 10);
+                    rgb(kSampleBadge), 10);
         put_text("SAMPLE", 38 + card_w - badge_w * 0.5f - 14, sample_y + 18, 10,
                  kAmber, FontStyle::Bold, 1.0f, true);
     }
@@ -1447,16 +1552,16 @@ void App::draw_library(Canvas& canvas) {
 void App::draw_picker(Canvas& canvas) {
     const float width = static_cast<float>(canvas.w());
     const float height = static_cast<float>(canvas.h());
-    canvas.clear(rgb(parse_hex("#050506")));
+    canvas.clear(rgb(kModalBg));
     canvas.rect(0, 0, width, height, ::Color{0, 0, 0, 0.55f});
 
     const float panel_w = std::min(760.0f, width - 80.0f);
     const float panel_h = std::min(580.0f, height - 90.0f);
     const float x = (width - panel_w) * 0.5f;
     const float y = (height - panel_h) * 0.5f;
-    canvas.rect(x, y, panel_w, panel_h, rgb(parse_hex("#18181b")), 14);
-    canvas.rect(x, y, panel_w, 1, rgb(parse_hex("#3a3a42")));
-    canvas.rect(x, y + panel_h - 1, panel_w, 1, rgb(parse_hex("#3a3a42")));
+    canvas.rect(x, y, panel_w, panel_h, rgb(kModalPanel), 14);
+    canvas.rect(x, y, panel_w, 1, rgb(kBorder));
+    canvas.rect(x, y + panel_h - 1, panel_w, 1, rgb(kBorder));
     add_hit("picker-panel", x, y, panel_w, panel_h);
 
     put_text("Open a script", x + 24, y + 18, 19, kText, FontStyle::Bold);
@@ -1474,9 +1579,10 @@ void App::draw_picker(Canvas& canvas) {
     for (int i = picker_scroll_;
          i < static_cast<int>(picker_entries_.size()) && i < picker_scroll_ + visible; ++i) {
         const PickerEntry& entry = picker_entries_[static_cast<std::size_t>(i)];
-        const float row_y = rows_y + (i - picker_scroll_) * kPickRow;
+        const float row_y =
+            rows_y + static_cast<float>(i - picker_scroll_) * kPickRow;
         if (i == picker_selected_) {
-            canvas.rect(x + 12, row_y, panel_w - 24, kPickRow - 2, rgb(parse_hex("#2a2114")), 7);
+            canvas.rect(x + 12, row_y, panel_w - 24, kPickRow - 2, rgb(kSelectedBg), 7);
         }
         put_text(entry.name, x + 24, row_y + 7, 14,
                  entry.directory ? kAmber : kText,
@@ -1540,52 +1646,66 @@ void App::draw_script(Canvas& canvas) {
         }
     }
 
-    std::vector<Glyph> frame;
-    frame.reserve(layout_.glyphs.size());
-    for (Glyph glyph : layout_.glyphs) {
+    script_frame_.clear();
+    script_colours_.clear();
+    script_frame_.reserve(layout_.glyphs.size());
+    script_colours_.reserve(layout_.glyphs.size());
+
+    const ::Color text_colour = to_color(kText);
+    const ::Color gray = to_color(kKaraokeGrayRgb);
+    int last_word = -1;
+    bool word_comment = false;
+    double word_progress = 0.0;
+    Rgb word_lit = kText;
+    Rgb comment_rgb = kAmberComment;
+    int word_chars = 0;
+
+    for (const Glyph& source : layout_.glyphs) {
+        if (!source.draw) continue;
+        Glyph glyph = source;
         glyph.y0 += dy;
         glyph.y1 += dy;
         glyph.line_center += dy;
-        if (!glyph.draw) continue;
         // Drop a whole glyph rather than clipping it at the overlay band: half
         // a letter peeking out from under the HUD reads as a rendering bug.
         if (glyph.line_center < top_clip) continue;
-        frame.push_back(glyph);
-    }
-    std::vector<::Color> colours(frame.size(), ::Color{1, 1, 1, 1});
-    const ::Color gray = to_color(parse_hex(kKaraokeGray));
-    const ::Color neutral = to_color(parse_hex(kKaraokeNeutral));
-    for (std::size_t i = 0; i < frame.size(); ++i) {
-        const Glyph& glyph = frame[i];
-        if (glyph.word_index < 0 ||
-            static_cast<std::size_t>(glyph.word_index) >= flat_words_.size()) {
-            colours[i] = to_color(kText);
-            continue;
+        if (glyph.y0 >= height) continue;
+
+        const int word_index = glyph.word_index;
+        ::Color colour = text_colour;
+        if (word_index >= 0 &&
+            static_cast<std::size_t>(word_index) < flat_words_.size()) {
+            if (word_index != last_word) {
+                last_word = word_index;
+                const Word& word = flat_words_[static_cast<std::size_t>(word_index)];
+                word_comment = word.is_comment;
+                word_progress = word_fill(word.clock, word.seconds, w_);
+                if (word_comment) {
+                    comment_rgb = karaoke_ ? comment_colour(word_progress) : kAmberComment;
+                } else {
+                    word_lit = mood_on_ ? mood_colour(word.mood) : kText;
+                    word_chars = (karaoke_ && word_progress > 0.0 && word_progress < 1.0)
+                        ? gui::utf8_codepoint_count(word.text) : 0;
+                }
+            }
+            if (word_comment) {
+                colour = to_color(comment_rgb);
+            } else if (!karaoke_ || word_progress >= 1.0) {
+                colour = to_color(word_lit);
+            } else if (word_progress <= 0.0) {
+                colour = gray;
+            } else {
+                const double cover =
+                    character_fill(word_progress, glyph.char_index, word_chars);
+                colour = to_color(mix(kKaraokeGrayRgb, word_lit, cover));
+            }
         }
-        const Word& word = flat_words_[static_cast<std::size_t>(glyph.word_index)];
-        const double progress = word_fill(word.clock, word.seconds, w_);
-        if (word.is_comment) {
-            const Rgb c = karaoke_ ? comment_colour(progress) : parse_hex(kCommentLit);
-            colours[i] = to_color(c, 1.0f);
-            continue;
-        }
-        const Rgb lit = mood_on_ ? mood_colour(word.mood) : parse_hex(kKaraokeNeutral);
-        if (!karaoke_) {
-            colours[i] = to_color(lit);
-        } else if (progress <= 0.0) {
-            colours[i] = gray;
-        } else if (progress >= 1.0) {
-            colours[i] = to_color(lit);
-        } else {
-            const int count = gui::utf8_codepoint_count(word.text);
-            const double cover = character_fill(progress, glyph.char_index, count);
-            colours[i] = to_color(mix(parse_hex(kKaraokeGray), lit, cover));
-        }
-        (void)neutral;
+        script_frame_.push_back(glyph);
+        script_colours_.push_back(colour);
     }
     canvas.clearClip();
     ClipRect clip{true, 0, top_clip, width, height};
-    text_.append(text_quads_, frame, colours, clip);
+    text_.append(text_quads_, script_frame_, script_colours_, clip);
 }
 
 void App::draw_cue_bars(Canvas& canvas) {
@@ -1622,7 +1742,6 @@ void App::draw_rec_frame(Canvas& canvas) {
 void App::draw_hud(Canvas& canvas) {
     if (!hud_visible_) return;
     const float width = static_cast<float>(canvas.w());
-    const float height = static_cast<float>(canvas.h());
     const float alpha = hud_dimmed_ ? 0.30f : 1.0f;
     const ::Color panel{0.07f, 0.07f, 0.07f, 0.62f * alpha};
 
@@ -1648,7 +1767,7 @@ void App::draw_hud(Canvas& canvas) {
     const std::string state = state_text();
     const float state_w = text_.width(state, 13, FontStyle::Bold) + 18.0f;
     canvas.rect(250, 22, state_w, 26, ::Color{1, 1, 1, 0.07f * alpha}, 13);
-    put_text(state, 250 + state_w * 0.5f, 27, 13, parse_hex("#9aa4b2"),
+    put_text(state, 250 + state_w * 0.5f, 27, 13, kStateText,
              FontStyle::Bold, alpha, true);
 
     float cursor_x = 250 + state_w + 14.0f;
@@ -1663,7 +1782,7 @@ void App::draw_hud(Canvas& canvas) {
     }
     const std::string theme = theme_text();
     if (!theme.empty()) {
-        put_text(theme, cursor_x, 28, 13, parse_hex("#b99a6a"), FontStyle::Roman, alpha);
+        put_text(theme, cursor_x, 28, 13, kThemeText, FontStyle::Roman, alpha);
     }
 
     // Right cluster.
@@ -1676,13 +1795,13 @@ void App::draw_hud(Canvas& canvas) {
     const float cue_x = width - 24 - total_w - 18 - cue_w;
     canvas.rect(cue_x, 21, cue_w, 27, ::Color{1, 1, 1, 0.06f * alpha}, 7);
     add_hit("cue", cue_x, 21, cue_w, 27);
-    put_text(cue, cue_x + cue_w * 0.5f, 27, 13, parse_hex("#cfcfcf"), FontStyle::Roman, alpha, true);
+    put_text(cue, cue_x + cue_w * 0.5f, 27, 13, kSoft, FontStyle::Roman, alpha, true);
 
     const std::string remaining = remaining_text();
     if (!remaining.empty()) {
         const double seconds_left = std::max(0.0, (1.0 - w_ / total_weight_) * duration_);
         const Rgb colour = seconds_left <= 10.0 ? kRed
-            : (seconds_left <= 30.0 ? kAmber : parse_hex("#cfcfcf"));
+            : (seconds_left <= 30.0 ? kAmber : kSoft);
         put_text(remaining, cue_x - 16 - text_.width(remaining, 14, FontStyle::Roman),
                  27, 14, colour, FontStyle::Roman, alpha);
     }
@@ -1692,10 +1811,9 @@ void App::draw_hud(Canvas& canvas) {
             text_.width(message_, 13, FontStyle::Roman) + 24.0f);
         canvas.rect(18, 66, msg_w, 28, ::Color{0.06f, 0.06f, 0.06f, 0.82f * alpha}, 8);
         put_text(message_, 30, 72, 13,
-                 message_error_ ? parse_hex("#ff8a80") : parse_hex("#cfcfcf"),
+                 message_error_ ? kErrorText : kSoft,
                  FontStyle::Roman, alpha);
     }
-    (void)height;
 }
 
 void App::draw_section(Canvas& canvas) {
@@ -1705,7 +1823,7 @@ void App::draw_section(Canvas& canvas) {
     if (!state || state->remaining <= 1e-9) return;
 
     const float width = static_cast<float>(canvas.w());
-    const float card_w = std::min(430.0f, width - 40.0f);
+    const float card_w = std::min(560.0f, width - 40.0f);
     const float card_h = 64.0f;
     const float x = (width - card_w) * 0.5f;
     const float y = 70.0f;
@@ -1715,12 +1833,17 @@ void App::draw_section(Canvas& canvas) {
     canvas.rect(x, y, 1, card_h, ::Color{0.94f, 0.63f, 0.24f, 0.38f});
     canvas.rect(x + card_w - 1, y, 1, card_h, ::Color{0.94f, 0.63f, 0.24f, 0.38f});
 
-    put_text(section_title(*state->paragraph, 38), x + 14, y + 7, 11,
-             parse_hex("#b99a6a"), FontStyle::Bold);
+    const float countdown_size = 13.0f;
     const std::string countdown = format_time(state->remaining) + " left of " +
                                   format_time(state->paragraph->seconds);
-    put_text(countdown, x + card_w - 14 - text_.width(countdown, 15, FontStyle::Bold),
-             y + 6, 15, kAmberComment, FontStyle::Bold);
+    const float countdown_w = text_.width(countdown, countdown_size, FontStyle::Bold);
+    const float title_max = std::max(24.0f, card_w - 28.0f - countdown_w - 14.0f);
+    const std::string title = fit_text(
+        text_, section_title(*state->paragraph, std::numeric_limits<int>::max()),
+        title_max, 12.0f, FontStyle::Bold);
+    put_text(title, x + 14, y + 11, 12, kThemeText, FontStyle::Bold);
+    put_text(countdown, x + card_w - 14 - countdown_w, y + 10, countdown_size,
+             kAmberComment, FontStyle::Bold);
 
     canvas.rect(x + 14, y + 46, card_w - 28, 4, ::Color{1, 1, 1, 0.12f}, 2);
     canvas.rect(x + 14, y + 46, (card_w - 28) * static_cast<float>(state->progress), 4,
@@ -1730,7 +1853,7 @@ void App::draw_section(Canvas& canvas) {
 void App::draw_font_menu(Canvas& canvas) {
     const float width = static_cast<float>(canvas.w());
     const float height = static_cast<float>(canvas.h());
-    canvas.clear(rgb(parse_hex("#050506")));
+    canvas.clear(rgb(kModalBg));
     canvas.rect(0, 0, width, height, ::Color{0, 0, 0, 0.74f});
 
     const auto& presets = gui::font_presets();
@@ -1738,12 +1861,12 @@ void App::draw_font_menu(Canvas& canvas) {
     const float panel_h = std::min(360.0f, height - 60.0f);
     const float x = (width - panel_w) * 0.5f;
     const float y = (height - panel_h) * 0.5f;
-    canvas.rect(x, y, panel_w, panel_h, rgb(parse_hex("#18181b")), 16);
-    canvas.rect(x, y, panel_w, 1, rgb(parse_hex("#3a3a42")));
-    canvas.rect(x, y + panel_h - 1, panel_w, 1, rgb(parse_hex("#3a3a42")));
+    canvas.rect(x, y, panel_w, panel_h, rgb(kModalPanel), 16);
+    canvas.rect(x, y, panel_w, 1, rgb(kBorder));
+    canvas.rect(x, y + panel_h - 1, panel_w, 1, rgb(kBorder));
 
     put_text("Script font", x + 28, y + 20, 19, kText, FontStyle::Bold);
-    put_text("Choose the face used by the script, HUD and library.",
+    put_text("Choose the face used across the app.",
              x + 28, y + 50, 13, kDim);
 
     const float row_h = 52.0f;
@@ -1753,7 +1876,7 @@ void App::draw_font_menu(Canvas& canvas) {
         const bool selected = static_cast<int>(i) == font_menu_selected_;
         const bool current = presets[i].id == current_font_.id;
         if (selected) {
-            canvas.rect(x + 16, row_y, panel_w - 32, row_h - 6, rgb(parse_hex("#2a2114")), 8);
+            canvas.rect(x + 16, row_y, panel_w - 32, row_h - 6, rgb(kSelectedBg), 8);
         }
         put_text(presets[i].label, x + 32, row_y + 9, 16,
                  selected ? kAmberLit : kText, FontStyle::Bold);
@@ -1769,18 +1892,19 @@ void App::draw_font_menu(Canvas& canvas) {
 void App::draw_help(Canvas& canvas) {
     const float width = static_cast<float>(canvas.w());
     const float height = static_cast<float>(canvas.h());
-    canvas.clear(rgb(parse_hex("#050506")));
+    canvas.clear(rgb(kModalBg));
     canvas.rect(0, 0, width, height, ::Color{0, 0, 0, 0.74f});
 
     const auto& rows = key_help();
     const float panel_w = std::min(900.0f, width - 60.0f);
     const float row_step = 24.0f;
-    const float panel_h = std::min(640.0f, 120.0f + rows.size() * row_step);
+    const float panel_h =
+        std::min(640.0f, 120.0f + static_cast<float>(rows.size()) * row_step);
     const float x = (width - panel_w) * 0.5f;
     const float y = (height - panel_h) * 0.5f;
-    canvas.rect(x, y, panel_w, panel_h, rgb(parse_hex("#18181b")), 16);
-    canvas.rect(x, y, panel_w, 1, rgb(parse_hex("#3a3a42")));
-    canvas.rect(x, y + panel_h - 1, panel_w, 1, rgb(parse_hex("#3a3a42")));
+    canvas.rect(x, y, panel_w, panel_h, rgb(kModalPanel), 16);
+    canvas.rect(x, y, panel_w, 1, rgb(kBorder));
+    canvas.rect(x, y + panel_h - 1, panel_w, 1, rgb(kBorder));
 
     put_text("Keyboard shortcuts", x + 28, y + 20, 19, kText, FontStyle::Bold);
 
@@ -1796,7 +1920,7 @@ void App::draw_help(Canvas& canvas) {
         const float row_y = y + 64 + static_cast<float>(i) * row_step;
         put_text(rows[i].first, keys_right - text_.width(rows[i].first, 14, FontStyle::Bold),
                  row_y, 14, kAmber, FontStyle::Bold);
-        put_text(rows[i].second, desc_x, row_y, 14, parse_hex("#cfcfcf"));
+        put_text(rows[i].second, desc_x, row_y, 14, kSoft);
     }
     put_text("Esc or ? closes this card", x + 28, y + panel_h - 34, 12, kDim);
 }

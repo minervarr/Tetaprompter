@@ -15,7 +15,10 @@
 namespace tp::gui {
 
 ::Color to_color(Rgb c, float alpha) {
-    return ::Color{c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, alpha};
+    return ::Color{static_cast<float>(c.r) / 255.0f,
+                   static_cast<float>(c.g) / 255.0f,
+                   static_cast<float>(c.b) / 255.0f,
+                   alpha};
 }
 
 TextPainter::~TextPainter() = default;
@@ -47,10 +50,8 @@ bool TextPainter::open_faces(Host& host, const FontPreset& preset, std::string& 
     }
     const std::string bold = data_path(host, preset.bold);
     const std::string italic = data_path(host, preset.italic);
-    const std::string mono = data_path(host, preset.mono);
     if (!bold.empty()) next->addStyle(host.dataReader(), bold.c_str(), FontStyle::Bold);
     if (!italic.empty()) next->addStyle(host.dataReader(), italic.c_str(), FontStyle::Italic);
-    if (!mono.empty()) next->addStyle(host.dataReader(), mono.c_str(), FontStyle::Math);
 
     // Missing codepoints (OpenDyslexic has no em dash, ellipsis or arrows) go
     // to the fallback face for the matching style.
@@ -189,7 +190,8 @@ void emit_quad(std::vector<float>& out, const Glyph& glyph, ::Color c,
         {x1, y1, u1, v1, c.r, c.g, c.b, c.a, p},
         {x0, y1, u0, v1, c.r, c.g, c.b, c.a, p},
     };
-    out.insert(out.end(), &verts[0][0], &verts[0][0] + 6 * 9);
+    out.insert(out.end(), &verts[0][0],
+               &verts[0][0] + sizeof(verts) / sizeof(verts[0][0]));
 }
 
 bool clip_glyph(const ClipRect& clip, Glyph& glyph) {
@@ -224,6 +226,7 @@ bool clip_glyph(const ClipRect& clip, Glyph& glyph) {
 void TextPainter::append(std::vector<float>& out, const std::vector<Glyph>& glyphs,
                          ::Color colour, const ClipRect& clip) const {
     for (const Glyph& source : glyphs) {
+        if (!source.draw) continue;
         Glyph glyph = source;
         if (!clip_glyph(clip, glyph)) continue;
         emit_quad(out, glyph, colour, glyph.x0, glyph.y0, glyph.x1, glyph.y1,
@@ -234,7 +237,9 @@ void TextPainter::append(std::vector<float>& out, const std::vector<Glyph>& glyp
 void TextPainter::append(std::vector<float>& out, const std::vector<Glyph>& glyphs,
                          const std::vector<::Color>& colours, const ClipRect& clip) const {
     for (std::size_t i = 0; i < glyphs.size(); ++i) {
-        Glyph glyph = glyphs[i];
+        const Glyph& source = glyphs[i];
+        if (!source.draw) continue;
+        Glyph glyph = source;
         if (!clip_glyph(clip, glyph)) continue;
         const ::Color colour = i < colours.size() ? colours[i] : ::Color{1, 1, 1, 1};
         emit_quad(out, glyph, colour, glyph.x0, glyph.y0, glyph.x1, glyph.y1,
@@ -256,7 +261,8 @@ void TextPainter::append_rect(std::vector<float>& out, float x, float y, float w
         {x + w, y + h, u, v, colour.r, colour.g, colour.b, colour.a, p},
         {x, y + h, u, v, colour.r, colour.g, colour.b, colour.a, p},
     };
-    out.insert(out.end(), &verts[0][0], &verts[0][0] + 6 * 9);
+    out.insert(out.end(), &verts[0][0],
+               &verts[0][0] + sizeof(verts) / sizeof(verts[0][0]));
 }
 
 } // namespace tp::gui

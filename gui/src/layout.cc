@@ -35,13 +35,12 @@ float line_height_for(const Paragraph& paragraph, float font_px, const TextPaint
 }
 
 
-std::vector<Atom> atoms_for_word(const Paragraph& paragraph, const Word& word, int index,
-                                 TextPainter& painter, float size, float max_width) {
+std::vector<Atom> atoms_for_word(const Word& word, int index, TextPainter& painter, float size,
+                                 float max_width) {
     std::vector<Atom> atoms;
     if (word.text.empty()) return atoms;
-    const FontStyle style = paragraph.is_direction
-        ? FontStyle::Math
-        : (word.bold ? FontStyle::Bold : (word.italic ? FontStyle::Italic : FontStyle::Roman));
+    const FontStyle style =
+        word.bold ? FontStyle::Bold : (word.italic ? FontStyle::Italic : FontStyle::Roman);
 
     // Split at spaces first: a comment is one timed token but may wrap like a
     // sentence. Spaces remain atoms so the line builder can trim them.
@@ -161,7 +160,7 @@ void add_bounds(PlacedWord& placed, float line_center, float x0, float x1) {
         }
     }
     placed.lines.push_back(PlacedLine{line_center, x0, x1});
-    if (placed.first_line_center == 0.0f) placed.first_line_center = line_center;
+    if (placed.first_line_center < 0.0f) placed.first_line_center = line_center;
 }
 
 } // namespace
@@ -179,8 +178,7 @@ int utf8_codepoint_count(std::string_view text) {
 ScriptLayout build_script_layout(const std::vector<Paragraph>& plan, TextPainter& painter,
                                  const ScriptMetrics& metrics) {
     ScriptLayout layout;
-    layout.script_px = metrics.font_px;
-    layout.direction_px = std::max(14.0f, std::round(metrics.font_px * 0.68f));
+    const float direction_px = std::max(14.0f, std::round(metrics.font_px * 0.68f));
     layout.column_width = std::min(metrics.width * 0.66f,
                                    std::max(metrics.font_px * 8.0f, metrics.width - 2.0f * metrics.font_px));
     layout.column_left = (metrics.width - layout.column_width) * 0.5f;
@@ -188,7 +186,6 @@ ScriptLayout build_script_layout(const std::vector<Paragraph>& plan, TextPainter
     int total_words = 0;
     for (const Paragraph& paragraph : plan) total_words += static_cast<int>(paragraph.words.size());
     layout.word_center.assign(static_cast<std::size_t>(total_words), 0.0f);
-    layout.word_seconds.assign(static_cast<std::size_t>(total_words), 0.0f);
     layout.words.reserve(static_cast<std::size_t>(total_words));
 
     const float gap = painter.line_height(metrics.font_px);
@@ -200,7 +197,7 @@ ScriptLayout build_script_layout(const std::vector<Paragraph>& plan, TextPainter
     for (std::size_t p_index = 0; p_index < plan.size(); ++p_index) {
         const Paragraph& paragraph = plan[p_index];
         const float line_h = line_height_for(paragraph, metrics.font_px, painter);
-        const float size = paragraph.is_direction ? layout.direction_px : metrics.font_px;
+        const float size = paragraph.is_direction ? direction_px : metrics.font_px;
         const float pad_x = paragraph.is_direction ? 16.0f : 0.0f;
         const float pad_y = paragraph.is_direction ? 9.0f : 0.0f;
         const float max_text_width = paragraph.is_direction
@@ -222,18 +219,17 @@ ScriptLayout build_script_layout(const std::vector<Paragraph>& plan, TextPainter
                     space.word = index;
                     space.char_offset = 0;
                     space.text = " ";
-                    space.style = paragraph.is_direction ? FontStyle::Math
-                        : (word.bold ? FontStyle::Bold : (word.italic ? FontStyle::Italic : FontStyle::Roman));
+                    space.style = word.bold ? FontStyle::Bold
+                        : (word.italic ? FontStyle::Italic : FontStyle::Roman);
                     space.space = true;
                     space.width = painter.width(" ", size, space.style);
                     atoms.push_back(std::move(space));
                 }
                 const std::vector<Atom> word_atoms =
-                    atoms_for_word(paragraph, word, index, painter, size, max_text_width);
+                    atoms_for_word(word, index, painter, size, max_text_width);
                 atoms.insert(atoms.end(), word_atoms.begin(), word_atoms.end());
             }
             word_slot(layout.words, index, word.is_comment, paragraph.is_direction);
-            layout.word_seconds[static_cast<std::size_t>(index)] = static_cast<float>(word.seconds);
         }
 
         std::vector<Line> lines = wrap_atoms(atoms, max_text_width);
@@ -253,10 +249,8 @@ ScriptLayout build_script_layout(const std::vector<Paragraph>& plan, TextPainter
             : lines.size() * line_h;
 
         PlacedParagraph placed_para;
-        placed_para.index = static_cast<int>(p_index);
         placed_para.direction = paragraph.is_direction;
         placed_para.top = top;
-        placed_para.bottom = top + paragraph_height;
         placed_para.card_x = card_left;
         placed_para.card_y = top;
         placed_para.card_w = paragraph.is_direction ? card_width : 0.0f;
@@ -289,41 +283,40 @@ ScriptLayout build_script_layout(const std::vector<Paragraph>& plan, TextPainter
                         PlacedWord& placed = layout.words[static_cast<std::size_t>(atom.word)];
                         add_bounds(placed, center, glyph.x0, glyph.x1);
                     }
-                    layout.glyphs.push_back(std::move(glyph));
+                    layout.glyphs.push_back(glyph);
                 }
             }
         }
 
-        // Word centres and per-paragraph word records are filled from the glyph
-        // stream, which is the same source the karaoke painter reads.
-        for (const PlacedWord& word : layout.words) {
-            if (word.index < 0) continue;
-            if (!word.lines.empty()) {
-                layout.word_center[static_cast<std::size_t>(word.index)] = word.first_line_center;
-            }
-        }
-        placed_para.words = layout.words;
-        layout.paragraphs.push_back(std::move(placed_para));
+        layout.paragraphs.push_back(placed_para);
 
         current_y = top + paragraph_height + gap;
         flat += static_cast<int>(paragraph.words.size());
     }
 
+    // Word centres come from the glyph stream, the same source the karaoke
+    // painter reads. Do this once, not once per paragraph.
+    for (const PlacedWord& word : layout.words) {
+        if (word.index < 0 || word.first_line_center < 0.0f) continue;
+        layout.word_center[static_cast<std::size_t>(word.index)] = word.first_line_center;
+    }
+
     // Fall back to the paragraph's first line for words that drew nothing.
+    std::size_t base = 0;
     for (std::size_t p_index = 0; p_index < plan.size(); ++p_index) {
         if (p_index >= layout.paragraphs.size()) break;
         const PlacedParagraph& placed = layout.paragraphs[p_index];
         const Paragraph& source = plan[p_index];
-        const float fallback = placed.direction ? placed.top + placed.card_h * 0.5f
-                                                : placed.top + line_height_for(source, metrics.font_px, painter) * 0.5f;
-        int base = 0;
-        for (std::size_t q = 0; q < p_index; ++q) base += static_cast<int>(plan[q].words.size());
+        const float fallback = placed.direction
+            ? placed.top + placed.card_h * 0.5f
+            : placed.top + line_height_for(source, metrics.font_px, painter) * 0.5f;
         for (std::size_t w = 0; w < source.words.size(); ++w) {
-            const int index = base + static_cast<int>(w);
-            if (layout.word_center[static_cast<std::size_t>(index)] == 0.0f) {
-                layout.word_center[static_cast<std::size_t>(index)] = fallback;
+            const std::size_t index = base + w;
+            if (index < layout.words.size() && layout.words[index].first_line_center < 0.0f) {
+                layout.word_center[index] = fallback;
             }
         }
+        base += source.words.size();
     }
 
     layout.max_scroll = std::max(0.0f, last_line_center);

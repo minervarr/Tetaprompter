@@ -59,7 +59,8 @@ public:
 private:
     static int shutdown_process(int pid, int stdin_fd);
     void drain_stderr(int fd);
-    void stop_worker();
+    void join_stderr();
+    void stop_worker(int pid, int stdin_fd);
 
     RecorderOptions options_;
     std::string path_;

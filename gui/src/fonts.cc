@@ -89,8 +89,6 @@ const std::vector<FontPreset>& font_presets() {
             "fonts/ui/NewCMSans10-Regular.otf",
             "fonts/ui/NewCMSans10-Bold.otf",
             "fonts/ui/NewCMSans10-Oblique.otf",
-            "fonts/ui/NewCMSans10-BoldOblique.otf",
-            "fonts/mono/NewCMMono10-Regular.otf",
             {},
             {},
             {},
@@ -101,8 +99,6 @@ const std::vector<FontPreset>& font_presets() {
             "fonts/openDix/OpenDyslexic-Regular.otf",
             "fonts/openDix/OpenDyslexic-Bold.otf",
             "fonts/openDix/OpenDyslexic-Italic.otf",
-            "fonts/openDix/OpenDyslexic-BoldItalic.otf",
-            "fonts/mono/NewCMMono10-Regular.otf",
             "fonts/ui/NewCMSans10-Regular.otf",
             "fonts/ui/NewCMSans10-Bold.otf",
             "fonts/ui/NewCMSans10-Oblique.otf",
@@ -150,11 +146,8 @@ bool make_font_preset(std::string_view choice, FontPreset& out, std::string& err
         out.regular = absolute_path(regular);
         const fs::path bold = find_face(requested, "bold");
         const fs::path italic = find_face(requested, "italic");
-        const fs::path bold_italic = find_face(requested, "bolditalic");
         if (font_file(bold)) out.bold = absolute_path(bold);
         if (font_file(italic)) out.italic = absolute_path(italic);
-        if (font_file(bold_italic)) out.bold_italic = absolute_path(bold_italic);
-        out.mono = "fonts/mono/NewCMMono10-Regular.otf";
         out.fallback_regular = "fonts/ui/NewCMSans10-Regular.otf";
         out.fallback_bold = "fonts/ui/NewCMSans10-Bold.otf";
         out.fallback_italic = "fonts/ui/NewCMSans10-Oblique.otf";
@@ -167,7 +160,6 @@ bool make_font_preset(std::string_view choice, FontPreset& out, std::string& err
         out.id = "custom:" + full;
         out.label = requested.stem().string();
         out.regular = full;
-        out.mono = "fonts/mono/NewCMMono10-Regular.otf";
         out.fallback_regular = "fonts/ui/NewCMSans10-Regular.otf";
         out.fallback_bold = "fonts/ui/NewCMSans10-Bold.otf";
         out.fallback_italic = "fonts/ui/NewCMSans10-Oblique.otf";

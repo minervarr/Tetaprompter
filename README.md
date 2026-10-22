@@ -20,27 +20,51 @@ Requirements (Arch names in parentheses):
 - a C++17 compiler
 - Vulkan loader + headers (`vulkan-icd-loader`, `vulkan-headers`)
 - Slang compiler (`slangc`, in the Vulkan SDK)
-- Wayland client/cursor + xkbcommon (`wayland`, `xkbcommon`)
+- Wayland client/cursor, xkbcommon, protocols + scanner (`wayland`,
+  `wayland-protocols`, `xkbcommon`)
 - `ffmpeg` / `ffprobe`
 
 ```sh
 git submodule update --init --recursive
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+./scripts/build.sh                  # Debug into build/ (tests included)
 ./scripts/verify.sh
 ```
 
-The executable lands at `build/gui/teleprompter`; shaders, fonts and the bundled
-test score are copied beside it automatically. Run it from anywhere:
+`scripts/build.sh` is the friendly front end: a stdlib-only Python zipapp
+(`scripts/teleprompter_builder.pyz`) around cmake + ninja. On a terminal it
+offers the build type; otherwise it builds Debug.
 
 ```sh
-./build/gui/teleprompter                 # library, fullscreen on DP-2
-./build/gui/teleprompter my-score.txt    # open a score fullscreen on DP-2
-./build/gui/teleprompter --windowed my-score.txt
-./build/gui/teleprompter --output DP-2 my-score.txt
+./scripts/build.sh build --release   # Release into build_release/ (no tests)
+./scripts/build.sh build --no-gui    # portable core + tests only
+./scripts/build.sh --version
+./scripts/build.sh build --dry-run
 ```
 
-`scripts/build.sh` is the same recipe, and `scripts/run.sh` builds and runs.
+It probes for `slangc` (or `$VULKAN_SDK`) and the Wayland/xkb development files,
+enables the window automatically when they are present, and falls back to a
+core-only build when they are not; `--gui` forces it and `--no-gui` skips it.
+Tests are Debug-only. The direct cmake recipe is equivalent:
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+The executable lands at `build/gui/teleprompter` (or
+`build_release/gui/teleprompter`); shaders, fonts and the bundled test score are
+copied beside it automatically. Run it from anywhere:
+
+```sh
+./build/gui/teleprompter                 # library, fullscreen on the current output
+./build/gui/teleprompter my-score.txt    # open a score fullscreen on the current output
+./build/gui/teleprompter --windowed my-score.txt
+./build/gui/teleprompter --output DP-2 my-score.txt  # or any Wayland connector
+```
+
+`scripts/run.sh` runs an existing build (Debug preferred, then Release) or
+builds Debug first.
 
 ## Command line
 
@@ -58,15 +82,14 @@ teleprompter --check
 - `--check` opens the camera and microphone for one second each and exits
   non-zero on failure.
 - `--size` must be an even `WIDTHxHEIGHT`; `1280x720` is the recording default.
-- `--output` selects the Wayland connector for the fullscreen window (default
-  `DP-2`, the local portrait monitor). If the connector is absent the
-  compositor chooses. A purely windowed surface cannot be positioned by a
-  Wayland client, so use fullscreen/`--output` when the monitor matters.
+- `--output` selects the Wayland connector for the fullscreen window (for
+  example `DP-2`). With no `--output`, the compositor chooses the current
+  output. A purely windowed surface cannot be positioned by a Wayland client,
+  so use fullscreen/`--output` when the monitor matters.
 - `--font` chooses `newcm` (the default New Computer Modern Sans), `opendyslexic`,
-  or a path to an `.otf`/`.ttf` file or a directory of faces. Changes made from
-  the in-app font menu are remembered in
-  `$XDG_STATE_HOME/teleprompter/settings.json`; `--font` itself is a one-run
-  override.
+  or a path to an `.otf`/`.ttf` file or a directory of faces. The choice is
+  remembered in `$XDG_STATE_HOME/teleprompter/settings.json`, whether it came
+  from the in-app menu or from `--font`.
 
 There is intentionally **no `--duration`**: the total is the sum of the
 authored word times.
@@ -130,10 +153,10 @@ The short form:
 ## Fonts and text quality
 
 OpenDyslexic is available next to New Computer Modern. Press **T** — or click
-the **Font: …** button in the library — to choose. The script, HUD, library and
-help card use the selected face; stage directions stay in the smaller
-monospace face so they remain visually distinct. OpenDyslexic is wider, so its
-preset uses a 0.70 size factor to keep a comparable amount of text per line.
+the **Font: …** button in the library — to choose. Every screen and every piece
+of text uses the selected face, including stage directions and comments.
+OpenDyslexic is wider, so its preset uses a 0.70 size factor to keep a
+comparable amount of text per line.
 It also lacks em dash, ellipsis and arrow glyphs; those fall back to New
 Computer Modern per style instead of disappearing.
 
@@ -217,13 +240,18 @@ only after timeouts. Takes live in `recordings/` beside the executable, named
 ## Tests
 
 ```sh
-./build/tests/teleprompter_core_tests
-./scripts/verify.sh
+ctest --test-dir build --output-on-failure      # C++ core (Debug only)
+./scripts/test_builder.sh                       # the build tool itself
+./scripts/verify.sh                             # everything below
 ```
 
-`scripts/verify.sh` additionally builds the bundled Python archive, checks its
-test suite, runs `--print-timing` on the sample, compares the totals, and runs
-the Vulkan capture on the sample score when a Wayland session is available.
+`./build/tests/teleprompter_core_tests` can still be run directly. A Release
+configure produces no test targets.
+
+`scripts/verify.sh` builds Debug, runs CTest and the builder's tests, builds the
+bundled Python archive, checks its test suite, runs `--print-timing` on the
+sample, compares the totals, and runs the Vulkan capture on the sample score
+when a Wayland session is available.
 
 ## License
 

@@ -10,7 +10,7 @@ struct Rgb {
     int r = 255, g = 255, b = 255;
 };
 
-Rgb parse_hex(std::string_view hex, Rgb fallback = {242, 242, 242});
+Rgb parse_hex(std::string_view hex, Rgb fallback = {242, 242, 242}) noexcept;
 std::string hex_from_rgb(Rgb c);
 Rgb mix(Rgb a, Rgb b, double amount);
 Rgb scale(Rgb c, double factor);

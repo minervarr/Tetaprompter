@@ -12,7 +12,7 @@ the changes.
 ```sh
 git clone https://github.com/minervarr/App_shell.git
 cd App_shell
-for p in /path/to/Teleprompter_Vk/patches/000[123]-*.patch; do
+for p in /path/to/Teleprompter_Vk/patches/000*-*.patch; do
     git apply "$p"
 done
 ```
@@ -25,6 +25,11 @@ done
 3. `WaylandDisplay::dispatch()` polls the host's timerfd too, so the app's
    16 ms scroll timer is not paced by the display's 250 ms idle timeout
    (which had made a 60 Hz scroll run at ~4 Hz).
+4. The unused parameter names are dropped from `AppView`'s and `Host`'s
+   default hook bodies, matching the unnamed style `setFullscreen(bool)` and
+   vk_canvas already use. They are intentional no-ops, so a consumer building
+   with `-Wextra` no longer reports `-Wunused-parameter` for framework
+   headers.
 
 ## Vk_Canvas_Lb_LAW
 

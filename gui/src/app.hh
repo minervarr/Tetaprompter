@@ -125,6 +125,7 @@ private:
     void draw_script(Canvas& canvas);
 
     void collect_all_text();
+    void refresh_text_font();
     void sync_font();
     void put_text(std::string_view text, float x, float top, float size, Rgb colour,
                   FontStyle style = FontStyle::Roman, float alpha = 1.0f,
@@ -171,6 +172,8 @@ private:
     bool playing_ = false;
     bool at_end_ = false;
     bool layout_dirty_ = true;
+    bool text_dirty_ = true;
+    bool font_dirty_ = true;
     bool needs_redraw_ = true;
     uint32_t layout_width_ = 0;
     uint32_t layout_height_ = 0;
@@ -192,7 +195,6 @@ private:
     std::string startup_font_error_;
     bool fullscreen_ = false;
     bool ctrl_down_ = false;
-    bool shift_down_ = false;
     int cursor_ = -1;
     double last_motion_t_ = 0.0;
 
@@ -201,6 +203,7 @@ private:
     std::vector<LibraryEntry> library_entries_;
     int library_selected_ = 0;
     float library_scroll_ = 0.0f;
+    bool library_reveal_ = true;
     bool picker_open_ = false;
     std::string picker_dir_;
     std::vector<PickerEntry> picker_entries_;
@@ -219,6 +222,8 @@ private:
 
     std::vector<float> shapes_;
     std::vector<float> text_quads_;
+    std::vector<Glyph> script_frame_;
+    std::vector<::Color> script_colours_;
     std::vector<Hit> hits_;
     int frames_drawn_ = 0;
 };
