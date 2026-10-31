@@ -60,6 +60,9 @@ const Rgb kModalPanel = parse_hex("#18181b");
 
 constexpr float kHudHeight = 46.0f;
 constexpr float kHudMargin = 12.0f;
+constexpr float kRadiusSmall = 8.0f;
+constexpr float kRadiusControl = 12.0f;
+constexpr float kRadiusPanel = 16.0f;
 constexpr float kCueStep = 0.02f;
 constexpr float kCueMin = 0.05f;
 constexpr float kCueMax = 0.60f;
@@ -1443,13 +1446,12 @@ void App::draw_library(Canvas& canvas) {
     const float open_x = width - 38.0f - open_w;
     const float font_w = std::min(230.0f, std::max(150.0f, open_x - 38.0f - 180.0f));
     const float font_x = open_x - 14.0f - font_w;
-    canvas.rect(font_x, 32, font_w, 42, rgb(kPanel), 10);
-    canvas.rect(font_x, 32, font_w, 1, rgb(kBorder));
-    canvas.rect(font_x, 73, font_w, 1, rgb(kBorder));
+    canvas.rect(font_x, 32, font_w, 42, rgb(kPanel), kRadiusControl);
+    canvas.rectOutline(font_x, 32, font_w, 42, rgb(kBorder), kRadiusControl);
     add_hit("font", font_x, 32, font_w, 42);
     put_text(preview_text("Font: " + current_font_.label, 26), font_x + 14, 43, 13,
              kSoft);
-    canvas.rect(open_x, 32, open_w, 42, rgb(kAmber), 10);
+    canvas.rect(open_x, 32, open_w, 42, rgb(kAmber), kRadiusControl);
     add_hit("open", open_x, 32, open_w, 42);
     put_text("Open script", open_x + open_w * 0.5f, 43, 15, kButtonInk,
              FontStyle::Bold, 1.0f, true);
@@ -1508,12 +1510,9 @@ void App::draw_library(Canvas& canvas) {
             const float y = start_y + static_cast<float>(row) * row_h;
             if (y + card_h < 130 || y > height - 24) continue;
             const LibraryEntry& entry = library_entries_[static_cast<std::size_t>(i)];
-            canvas.rect(x, y, card_w, card_h, rgb(kPanel), 12);
+            canvas.rect(x, y, card_w, card_h, rgb(kPanel), kRadiusControl);
             const Rgb border = i == library_selected_ ? kAmber : kCardBorder;
-            canvas.rect(x, y, card_w, 1, rgb(border));
-            canvas.rect(x, y + card_h - 1, card_w, 1, rgb(border));
-            canvas.rect(x, y, 1, card_h, rgb(border));
-            canvas.rect(x + card_w - 1, y, 1, card_h, rgb(border));
+            canvas.rectOutline(x, y, card_w, card_h, rgb(border), kRadiusControl);
             add_hit("card:" + std::to_string(i), x, y, card_w, card_h);
             put_text(preview_text(entry.title, 34), x + 16, y + 14, 16, kText, FontStyle::Bold);
             put_text(preview_text(entry.subtitle, 44), x + 16, y + 44, 12, kDim);
@@ -1528,12 +1527,9 @@ void App::draw_library(Canvas& canvas) {
     const LibraryEntry& sample = library_entries_.back();
     if (sample_y + card_h > 120 && sample_y < height - 24) {
         const bool selected = library_selected_ == static_cast<int>(library_entries_.size()) - 1;
-        canvas.rect(38, sample_y, card_w, card_h, rgb(kSamplePanel), 12);
+        canvas.rect(38, sample_y, card_w, card_h, rgb(kSamplePanel), kRadiusControl);
         const Rgb border = selected ? kAmber : kSampleBorder;
-        canvas.rect(38, sample_y, card_w, 1, rgb(border));
-        canvas.rect(38, sample_y + card_h - 1, card_w, 1, rgb(border));
-        canvas.rect(38, sample_y, 1, card_h, rgb(border));
-        canvas.rect(38 + card_w - 1, sample_y, 1, card_h, rgb(border));
+        canvas.rectOutline(38, sample_y, card_w, card_h, rgb(border), kRadiusControl);
         add_hit("card:" + std::to_string(library_entries_.size() - 1),
                 38, sample_y, card_w, card_h);
         put_text("Test script", 54, sample_y + 14, 16, kText, FontStyle::Bold);
@@ -1559,9 +1555,8 @@ void App::draw_picker(Canvas& canvas) {
     const float panel_h = std::min(580.0f, height - 90.0f);
     const float x = (width - panel_w) * 0.5f;
     const float y = (height - panel_h) * 0.5f;
-    canvas.rect(x, y, panel_w, panel_h, rgb(kModalPanel), 14);
-    canvas.rect(x, y, panel_w, 1, rgb(kBorder));
-    canvas.rect(x, y + panel_h - 1, panel_w, 1, rgb(kBorder));
+    canvas.rect(x, y, panel_w, panel_h, rgb(kModalPanel), kRadiusPanel);
+    canvas.rectOutline(x, y, panel_w, panel_h, rgb(kBorder), kRadiusPanel);
     add_hit("picker-panel", x, y, panel_w, panel_h);
 
     put_text("Open a script", x + 24, y + 18, 19, kText, FontStyle::Bold);
@@ -1582,7 +1577,8 @@ void App::draw_picker(Canvas& canvas) {
         const float row_y =
             rows_y + static_cast<float>(i - picker_scroll_) * kPickRow;
         if (i == picker_selected_) {
-            canvas.rect(x + 12, row_y, panel_w - 24, kPickRow - 2, rgb(kSelectedBg), 7);
+            canvas.rect(x + 12, row_y, panel_w - 24, kPickRow - 2,
+                        rgb(kSelectedBg), kRadiusSmall);
         }
         put_text(entry.name, x + 24, row_y + 7, 14,
                  entry.directory ? kAmber : kText,
@@ -1625,13 +1621,13 @@ void App::draw_script(Canvas& canvas) {
         const float y = paragraph.card_y + dy;
         if (y > height || y + paragraph.card_h < 0 || y < top_clip) continue;
         canvas.rect(paragraph.card_x, y, paragraph.card_w, paragraph.card_h,
-                    ::Color{0.14f, 0.11f, 0.06f, 0.92f}, 8);
-        canvas.rect(paragraph.card_x, y, 4, paragraph.card_h,
+                    ::Color{0.14f, 0.11f, 0.06f, 0.92f}, kRadiusControl);
+        canvas.rectOutline(paragraph.card_x, y, paragraph.card_w, paragraph.card_h,
+                           ::Color{0.94f, 0.63f, 0.24f, 0.28f}, kRadiusControl);
+        const float bar_inset = std::min(kRadiusControl, paragraph.card_h * 0.5f);
+        canvas.rect(paragraph.card_x + 1.0f, y + bar_inset, 4.0f,
+                    std::max(0.0f, paragraph.card_h - 2.0f * bar_inset),
                     ::Color{0.94f, 0.63f, 0.24f, 0.70f}, 2);
-        canvas.rect(paragraph.card_x, y, paragraph.card_w, 1,
-                    ::Color{0.94f, 0.63f, 0.24f, 0.28f});
-        canvas.rect(paragraph.card_x, y + paragraph.card_h - 1, paragraph.card_w, 1,
-                    ::Color{0.94f, 0.63f, 0.24f, 0.28f});
     }
 
     for (const gui::PlacedWord& word : layout_.words) {
@@ -1745,10 +1741,11 @@ void App::draw_hud(Canvas& canvas) {
     const float alpha = hud_dimmed_ ? 0.30f : 1.0f;
     const ::Color panel{0.07f, 0.07f, 0.07f, 0.62f * alpha};
 
-    canvas.rect(kHudMargin, kHudMargin, width - 2 * kHudMargin, kHudHeight, panel, 12);
+    canvas.rect(kHudMargin, kHudMargin, width - 2 * kHudMargin, kHudHeight, panel,
+                kRadiusControl);
 
     // Scripts
-    canvas.rect(18, 18, 96, 34, ::Color{1, 1, 1, 0.06f * alpha}, 8);
+    canvas.rect(18, 18, 96, 34, ::Color{1, 1, 1, 0.06f * alpha}, kRadiusSmall);
     add_hit("home", 18, 18, 96, 34);
     put_text("Scripts", 66, 27, 14, kText, FontStyle::Roman, alpha, true);
 
@@ -1757,7 +1754,7 @@ void App::draw_hud(Canvas& canvas) {
     const bool finalizing = rec_phase_ == RecPhase::Finalizing;
     canvas.rect(120, 18, 118, 34,
                 recording ? ::Color{0.55f, 0.08f, 0.10f, 0.55f * alpha}
-                          : ::Color{1, 1, 1, 0.06f * alpha}, 8);
+                          : ::Color{1, 1, 1, 0.06f * alpha}, kRadiusSmall);
     add_hit("record", 120, 18, 118, 34);
     const std::string record_label = recording ? "Stop" : (finalizing ? "Finalizing…" : "Record");
     put_text(record_label, 179, 27, 14, recording ? kRed : kText,
@@ -1793,7 +1790,8 @@ void App::draw_hud(Canvas& canvas) {
     const std::string cue = "- " + std::to_string(static_cast<int>(std::lround(cue_fraction_ * 100))) + "%";
     const float cue_w = 78.0f;
     const float cue_x = width - 24 - total_w - 18 - cue_w;
-    canvas.rect(cue_x, 21, cue_w, 27, ::Color{1, 1, 1, 0.06f * alpha}, 7);
+    canvas.rect(cue_x, 21, cue_w, 27, ::Color{1, 1, 1, 0.06f * alpha},
+                kRadiusSmall);
     add_hit("cue", cue_x, 21, cue_w, 27);
     put_text(cue, cue_x + cue_w * 0.5f, 27, 13, kSoft, FontStyle::Roman, alpha, true);
 
@@ -1809,7 +1807,8 @@ void App::draw_hud(Canvas& canvas) {
     if (message_visible()) {
         const float msg_w = std::min(width - 40.0f,
             text_.width(message_, 13, FontStyle::Roman) + 24.0f);
-        canvas.rect(18, 66, msg_w, 28, ::Color{0.06f, 0.06f, 0.06f, 0.82f * alpha}, 8);
+        canvas.rect(18, 66, msg_w, 28,
+                    ::Color{0.06f, 0.06f, 0.06f, 0.82f * alpha}, kRadiusSmall);
         put_text(message_, 30, 72, 13,
                  message_error_ ? kErrorText : kSoft,
                  FontStyle::Roman, alpha);
@@ -1827,11 +1826,10 @@ void App::draw_section(Canvas& canvas) {
     const float card_h = 64.0f;
     const float x = (width - card_w) * 0.5f;
     const float y = 70.0f;
-    canvas.rect(x, y, card_w, card_h, ::Color{0.08f, 0.06f, 0.03f, 0.95f}, 10);
-    canvas.rect(x, y, card_w, 1, ::Color{0.94f, 0.63f, 0.24f, 0.38f});
-    canvas.rect(x, y + card_h - 1, card_w, 1, ::Color{0.94f, 0.63f, 0.24f, 0.38f});
-    canvas.rect(x, y, 1, card_h, ::Color{0.94f, 0.63f, 0.24f, 0.38f});
-    canvas.rect(x + card_w - 1, y, 1, card_h, ::Color{0.94f, 0.63f, 0.24f, 0.38f});
+    canvas.rect(x, y, card_w, card_h, ::Color{0.08f, 0.06f, 0.03f, 0.95f},
+                kRadiusControl);
+    canvas.rectOutline(x, y, card_w, card_h,
+                       ::Color{0.94f, 0.63f, 0.24f, 0.38f}, kRadiusControl);
 
     const float countdown_size = 13.0f;
     const std::string countdown = format_time(state->remaining) + " left of " +
@@ -1861,9 +1859,8 @@ void App::draw_font_menu(Canvas& canvas) {
     const float panel_h = std::min(360.0f, height - 60.0f);
     const float x = (width - panel_w) * 0.5f;
     const float y = (height - panel_h) * 0.5f;
-    canvas.rect(x, y, panel_w, panel_h, rgb(kModalPanel), 16);
-    canvas.rect(x, y, panel_w, 1, rgb(kBorder));
-    canvas.rect(x, y + panel_h - 1, panel_w, 1, rgb(kBorder));
+    canvas.rect(x, y, panel_w, panel_h, rgb(kModalPanel), kRadiusPanel);
+    canvas.rectOutline(x, y, panel_w, panel_h, rgb(kBorder), kRadiusPanel);
 
     put_text("Script font", x + 28, y + 20, 19, kText, FontStyle::Bold);
     put_text("Choose the face used across the app.",
@@ -1876,7 +1873,8 @@ void App::draw_font_menu(Canvas& canvas) {
         const bool selected = static_cast<int>(i) == font_menu_selected_;
         const bool current = presets[i].id == current_font_.id;
         if (selected) {
-            canvas.rect(x + 16, row_y, panel_w - 32, row_h - 6, rgb(kSelectedBg), 8);
+            canvas.rect(x + 16, row_y, panel_w - 32, row_h - 6,
+                        rgb(kSelectedBg), kRadiusSmall);
         }
         put_text(presets[i].label, x + 32, row_y + 9, 16,
                  selected ? kAmberLit : kText, FontStyle::Bold);
@@ -1902,9 +1900,8 @@ void App::draw_help(Canvas& canvas) {
         std::min(640.0f, 120.0f + static_cast<float>(rows.size()) * row_step);
     const float x = (width - panel_w) * 0.5f;
     const float y = (height - panel_h) * 0.5f;
-    canvas.rect(x, y, panel_w, panel_h, rgb(kModalPanel), 16);
-    canvas.rect(x, y, panel_w, 1, rgb(kBorder));
-    canvas.rect(x, y + panel_h - 1, panel_w, 1, rgb(kBorder));
+    canvas.rect(x, y, panel_w, panel_h, rgb(kModalPanel), kRadiusPanel);
+    canvas.rectOutline(x, y, panel_w, panel_h, rgb(kBorder), kRadiusPanel);
 
     put_text("Keyboard shortcuts", x + 28, y + 20, 19, kText, FontStyle::Bold);
 
