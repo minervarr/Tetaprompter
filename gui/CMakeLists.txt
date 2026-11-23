@@ -21,7 +21,7 @@ else()
     target_compile_options(teleprompter PRIVATE -Wall -Wextra)
 endif()
 
-add_dependencies(teleprompter compile_font_shaders compile_canvas_shaders)
+add_dependencies(teleprompter compile_font_shaders compile_font_compute_shaders compile_canvas_shaders)
 
 add_custom_target(teleprompter_assets ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory
@@ -39,5 +39,5 @@ add_custom_target(teleprompter_assets ALL
             ${CMAKE_SOURCE_DIR}/assets/fonts
             $<TARGET_FILE_DIR:teleprompter>/fonts
     COMMENT "Copying shaders and fonts next to teleprompter")
-add_dependencies(teleprompter_assets compile_font_shaders compile_canvas_shaders)
+add_dependencies(teleprompter_assets compile_font_shaders compile_font_compute_shaders compile_canvas_shaders)
 add_dependencies(teleprompter teleprompter_assets)
